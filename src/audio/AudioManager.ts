@@ -191,18 +191,42 @@ export class AudioManager implements AudioSink {
   }
 
   /**
-   * ワンショットSEを再生。running でない/未生成/未登録なら安全に何もしない
-   * （suspended 中にスケジュールを溜め込まないため running 限定）。
+   * ワンショットSEを再生。context 状態で分岐する（未生成/未登録なら安全に何もしない）。
+   * - running: 従来どおり同期で即発火する（挙動不変）。
+   * - suspended: 初回ユーザージェスチャ起点の呼び出しを想定し、resume() を試みて、
+   *   resume が成功して running になった時だけ 1 回発火する（初回捕獲タップの反応SEを鳴らすため）。
+   *   autoplay ポリシーで resume が拒否され suspended のままなら発火しない
+   *   （＝suspended 中にスケジュールを溜め込まない元意図を維持。resume は冪等なので連続呼びも安全）。
+   * - closed / unavailable(context 未生成): 従来どおり何もしない（無音維持）。
    */
   playOneShot(id: string): void {
     const engine = this.engine();
-    if (!engine || this.ctx?.state !== "running") {
+    if (!engine) {
       return;
     }
     const builder = this.oneShots.get(id);
     if (!builder) {
       return;
     }
+    const state = this.ctx?.state;
+    if (state === "running") {
+      // running 経路は同期で即発火（既存挙動を変えない）。
+      this.fireOneShot(builder, engine, id);
+      return;
+    }
+    if (state === "suspended") {
+      // 初回ジェスチャ起点: resume が成功して running になった時だけ遅延発火する。
+      void this.resume().then(() => {
+        if (this.ctx?.state === "running") {
+          this.fireOneShot(builder, engine, id);
+        }
+      });
+    }
+    // closed 等は何もしない（無音維持）。
+  }
+
+  /** バンクビルダを実行して 1 発鳴らす。発火失敗は警告のみで握りつぶす（running/遅延 両経路で共通）。 */
+  private fireOneShot(builder: OneShotBuilder, engine: AudioEngine, id: string): void {
     try {
       builder(engine);
     } catch (error) {
