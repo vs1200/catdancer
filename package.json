@@ -10,13 +10,15 @@
     "preview": "vite preview",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "shoot": "node tools/screenshot.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.19.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
+    "playwright": "^1.61.1",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"
