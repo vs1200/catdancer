@@ -26,6 +26,8 @@ export class Scene {
   readonly background: Container;
   /** critter レイヤ（前面）。 */
   readonly critters: Container;
+  /** エフェクトレイヤ（最前面）。捕獲バースト等の短命な演出を置く。 */
+  private readonly effectsLayer: Container;
   private readonly backgroundLayerValue: BackgroundLayer;
   private worldBoundsValue: WorldBounds;
   /**
@@ -38,9 +40,11 @@ export class Scene {
     this.root = new Container();
     this.background = new Container();
     this.critters = new Container();
-    // 背景を奥、critter を前面に。
+    this.effectsLayer = new Container();
+    // 背景を奥、critter を前面、エフェクトを最前面に。
     this.root.addChild(this.background);
     this.root.addChild(this.critters);
+    this.root.addChild(this.effectsLayer);
     // 背景描画（単色 fill + 任意画像）を background 内に構築する。
     this.backgroundLayerValue = new BackgroundLayer(viewport);
     this.background.addChild(this.backgroundLayerValue.root);
@@ -49,6 +53,14 @@ export class Scene {
 
   get worldBounds(): WorldBounds {
     return this.worldBoundsValue;
+  }
+
+  /**
+   * エフェクトレイヤ（最前面）。捕獲バースト等の短命な演出の描画先。
+   * transient なので resize 対象外（world 座標系で都度生成/破棄される）。
+   */
+  get effects(): Container {
+    return this.effectsLayer;
   }
 
   /** 背景描画レイヤ（色/画像の適用は BackgroundController が駆動する）。 */

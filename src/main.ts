@@ -1,5 +1,6 @@
 import { Assets, type Texture } from "pixi.js";
 import { BackgroundController } from "./app/BackgroundController";
+import { CaptureEffects } from "./app/CaptureEffects";
 import { CatDancerApp } from "./app/CatDancerApp";
 import { textureFromImageWithin } from "./app/imageTexture";
 import { clientToWorld, PointerInput } from "./app/PointerInput";
@@ -79,6 +80,10 @@ async function bootstrap(): Promise<void> {
 
   // 背景設定 → 描画の橋渡し。
   const backgroundController = new BackgroundController(scene.backgroundLayer);
+
+  // 捕獲成功の視覚演出（バースト）。scene.effects（critter より前面）へ短命リングを出す。
+  // 捕獲SE と対になる視覚フィードバックで、狩りの報酬感を高める。
+  const captureEffects = new CaptureEffects(scene.effects);
 
   // 共有テクスチャ: 各種別の本体と尻尾（mouse-tail.webp=本物）を 1 度だけロードする。
   // 全 critter で共有するため、AutoMode の多数 spawn でもテクスチャは増えない
@@ -266,7 +271,10 @@ async function bootstrap(): Promise<void> {
       return;
     }
     const p = clientToWorld(app.canvas, app.viewport, event.clientX, event.clientY);
-    autoMode.handleTap(p.x, p.y);
+    // ヒット時のみ捕獲演出を出す（handleTap が true）。空きスペースのタップ（false）では出さない。
+    if (autoMode.handleTap(p.x, p.y)) {
+      captureEffects.burst(p.x, p.y);
+    }
   });
 
   // 設定変更の反映（音量/背景 + モード/出現間隔 + カスタム画像クリッター）。前回値と比較して差分だけ反映する。
@@ -343,6 +351,8 @@ async function bootstrap(): Promise<void> {
   if (import.meta.env.DEV) {
     (window as unknown as { __catScene?: unknown }).__catScene = {
       critterCount: () => scene.critterCount,
+      // 進行中の捕獲演出数（リーク検証: 捕獲後しばらくして 0 に戻ることを観測する）。
+      effectsCount: () => captureEffects.activeCount,
       mode: () => currentModeName,
       // モード切替（例: __catScene.setMode('auto')）。settings 経由で switchTo が走る。
       setMode: (name: AppMode) => settings.setMode(name),
@@ -440,6 +450,8 @@ async function bootstrap(): Promise<void> {
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
     currentMode?.update(dt);
+    // 捕獲バースト演出を進める（進行中が無ければ実質 no-op）。終了分は内部で destroy される。
+    captureEffects.update(dt);
     // 遊びすぎ防止: auto の active 再生（パネル閉・未停止）フレームだけ積算する。
     // tick は update の後（このフレームの描画整合を保つ）。上限到達で自動停止＝
     // despawn＋無音にして再開オーバーレイを出す。
