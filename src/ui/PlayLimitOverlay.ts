@@ -118,7 +118,8 @@ export class PlayLimitOverlay {
     const overlay = document.createElement("div");
     overlay.className = "cd-playlimit-overlay";
     overlay.setAttribute("role", "dialog");
-    overlay.setAttribute("aria-modal", "true");
+    // aria-modal は付けない: 停止中も外側の歯車ボタンから設定を開いて再武装できる設計のため
+    // （外側を inert とする aria-modal="true" は本機能の導線と矛盾する）。
     overlay.setAttribute("aria-labelledby", "cd-playlimit-title");
     // 背後 canvas へ pointer を漏らさない（このオーバーレイが受け止める）。
     overlay.addEventListener("pointerdown", (event) => event.stopPropagation());

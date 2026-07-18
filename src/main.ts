@@ -218,6 +218,13 @@ async function bootstrap(): Promise<void> {
   const playLimitOverlay = new PlayLimitOverlay({ onResume: () => resumeFromPlayLimit() });
   playLimitOverlay.mount(document.body);
 
+  /** タイマー上限到達での自動停止（despawn＋無音＋オーバーレイ表示）。ticker と DEV forceExpire で共用。 */
+  const triggerAutoStop = (): void => {
+    autoMode.stop();
+    autoStoppedByTimer = true;
+    playLimitOverlay.show();
+  };
+
   /** 自動停止を解除して auto を再開する（オーバーレイ hide＋タイマー再武装。停止中のみ有効）。 */
   function resumeFromPlayLimit(): void {
     if (!autoStoppedByTimer) {
@@ -226,9 +233,14 @@ async function bootstrap(): Promise<void> {
     autoStoppedByTimer = false;
     playLimitOverlay.hide();
     playLimitTimer.reset();
-    autoMode.start();
-    // パネルが開いていれば一時停止を引き継ぐ。
-    autoMode.setPaused(panelOpen);
+    // 停止フラグは auto 専用（switchTo が離脱時に必ず解除する）。不変条件が将来崩れても
+    // manual 中に autoMode を start して両モードの critter が混在する事故を防ぐため、
+    // 解除は常に行いつつ、実際の再開は現行が auto の時だけにする（防御的ガード）。
+    if (currentModeName === "auto") {
+      autoMode.start();
+      // パネルが開いていれば一時停止を引き継ぐ。
+      autoMode.setPaused(panelOpen);
+    }
   }
 
   /** 現行モードを止め、指定モードへ切り替える（前モードの critter を後始末してから開始）。 */
@@ -399,9 +411,7 @@ async function bootstrap(): Promise<void> {
             return false;
           }
           if (playLimitTimer.tick(1e9)) {
-            autoMode.stop();
-            autoStoppedByTimer = true;
-            playLimitOverlay.show();
+            triggerAutoStop();
             return true;
           }
           return false;
@@ -439,9 +449,7 @@ async function bootstrap(): Promise<void> {
       !autoStoppedByTimer &&
       playLimitTimer.tick(dt)
     ) {
-      autoMode.stop();
-      autoStoppedByTimer = true;
-      playLimitOverlay.show();
+      triggerAutoStop();
     }
   });
 }
