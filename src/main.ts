@@ -13,6 +13,8 @@ import { computeWorldMargin } from "./critters/worldMargin";
 import type { MovementContext } from "./movement/Movement";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppSettings } from "./settings/settingsData";
+import { OptionsButton } from "./ui/OptionsButton";
+import { OptionsPanel } from "./ui/OptionsPanel";
 
 /**
  * catdancer エントリ（v1 マウス操作モード）。
@@ -101,6 +103,24 @@ async function bootstrap(): Promise<void> {
       settings: () => settings.settings,
     };
   }
+
+  // オプション画面（右下ボタン→設定パネル）を実インスタンス配線で組み立てる。
+  // パネルは settings の公開 API を呼び、音量は settings 経由で AudioManager にも適用される。
+  // 開いている間はポインタ追従を止めてネズミを中央に留める（パネル操作で誤って画面外へ飛ばさない。
+  // canvas を覆う HTML 要素上で発火する pointerleave が pointer=null にするのを避ける）。閉じたら再開。
+  const optionsPanel = new OptionsPanel({ settings, audio });
+  const optionsButton = new OptionsButton({ onClick: () => optionsPanel.toggle() });
+  optionsPanel.setOnOpenChange((open) => {
+    optionsButton.setExpanded(open);
+    if (open) {
+      pointerInput.detach();
+      pointerInput.centerToViewport();
+    } else {
+      pointerInput.attach();
+    }
+  });
+  optionsPanel.mount(document.body);
+  optionsButton.mount(document.body);
 
   // 毎フレーム movement を適用して表示同期。world/pointer は都度最新を参照（resize 追従）。
   const ctx: MovementContext = { world: scene.worldBounds, pointer: pointerInput.pointer.value };
