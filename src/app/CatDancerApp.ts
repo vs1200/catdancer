@@ -47,6 +47,11 @@ export class CatDancerApp {
     return this.app.stage;
   }
 
+  /** ポインタ入力の配線先。画面全体を覆う描画 canvas。 */
+  get canvas(): HTMLCanvasElement {
+    return this.app.canvas;
+  }
+
   /** 現在の画面サイズ（CSS ピクセル）。 */
   get viewport(): Viewport {
     return { width: this.app.screen.width, height: this.app.screen.height };

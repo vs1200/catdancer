@@ -4,13 +4,12 @@ import { createWorldBounds } from "../core/worldBounds";
 import type { Critter } from "../critters/Critter";
 
 /**
- * world margin(画面外バッファ)の既定値(px)。
+ * world margin(画面外バッファ)の fallback 値(px)。
  *
- * 根拠: critter は中心座標で管理し表示は中心アンカー。最大 critter の表示最大辺は
- * 現状ネズミの baseSize=160px（将来オブジェクト追加で増える）。中心が margin ぶん
- * 画面外へ出れば最大辺の半分(80px)を優に超えて隠れられるよう、余裕を持たせて 220px とする。
- * 斜め出入りや今後の大きめオブジェクト(猫じゃらし等)も見据えた値。
- * 将来は登録済み種別の最大 baseSize から動的算出できる（registry.listCritterTypes 参照）。
+ * critter は中心座標で管理し表示は中心アンカー。中心が margin ぶん画面外へ出れば全パーツが
+ * 隠れる、という前提で margin を決める。実運用の margin は登録済み種別の
+ * hideRadius（本体＋尻尾先端の到達距離）から動的算出する（critters/worldMargin の
+ * computeWorldMargin, main.ts で適用）。本定数は種別未登録時などの fallback として用いる。
  */
 export const DEFAULT_WORLD_MARGIN = 220;
 

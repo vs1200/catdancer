@@ -10,6 +10,7 @@ import {
 } from "../../src/critters/registry";
 import { MOUSE_TYPE_ID, registerMouseType } from "../../src/critters/types/mouse";
 import { DriftMovement } from "../../src/movement/DriftMovement";
+import { MouseFollowMovement } from "../../src/movement/MouseFollowMovement";
 
 // テスト用のダミー種別（PixiJS 非依存）。
 function makeType(id: string, overrides: Partial<CritterType> = {}): CritterType {
@@ -79,6 +80,7 @@ describe("registry", () => {
     expect(mouse.hasTail).toBe(true);
     expect(mouse.defaultFacing).toBe(1);
     expect(mouse.textureUrl).toContain("assets/critters/mouse-body.webp");
-    expect(mouse.createMovement()).toBeInstanceOf(DriftMovement);
+    // v1 マウス操作モードの既定 Movement は MouseFollowMovement（ポインタ慣性追従）。
+    expect(mouse.createMovement()).toBeInstanceOf(MouseFollowMovement);
   });
 });

@@ -1,4 +1,4 @@
-import { DriftMovement } from "../../movement/DriftMovement";
+import { MouseFollowMovement } from "../../movement/MouseFollowMovement";
 import type { CritterType } from "../CritterType";
 import { registerCritterType } from "../registry";
 
@@ -20,7 +20,8 @@ export const mouseType: CritterType = {
   textureUrl: MOUSE_TEXTURE_URL,
   baseSize: 220,
   defaultFacing: 1,
-  createMovement: () => new DriftMovement(),
+  // v1 マウス操作モードの既定。ポインタへ慣性追従＋画面外バッファで出現/消失する。
+  createMovement: () => new MouseFollowMovement(),
   sounds: { idle: "mouse-chuchu", move: "mouse-run" },
   hasTail: true,
   tail: {
