@@ -387,7 +387,9 @@ export class OptionsPanel {
 
     // Esc で閉じる（入力中にフォーカスがどこにあっても効くよう document で購読）。
     document.addEventListener("keydown", this.onKeyDown);
-    // F11/Esc など外部操作でも全画面状態に追従してラベルを同期する。destroy() で必ず外す。
+    // Esc など Fullscreen API の外部解除にも追従してラベルを同期する（F11 のブラウザネイティブ
+    // 全画面は fullscreenchange を発火せず document.fullscreenElement も立たないため対象外）。
+    // destroy() で必ず外す。
     document.addEventListener("fullscreenchange", this.onFullscreenChange);
 
     // 現在値を反映しつつ外部変更にも追従。
@@ -458,7 +460,7 @@ export class OptionsPanel {
     }
   };
 
-  /** 全画面状態が変化したら（F11/Esc 含む）ボタンのラベル/aria を追従させる。 */
+  /** Fullscreen API の状態変化（Esc での解除等）でボタンのラベル/aria を追従させる。 */
   private readonly onFullscreenChange = (): void => {
     this.syncFullscreen();
   };
