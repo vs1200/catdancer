@@ -96,6 +96,7 @@ export class OptionsPanel {
   private readonly critterFileInput: HTMLInputElement;
   private readonly volumeInput: HTMLInputElement;
   private readonly volumeValue: HTMLSpanElement;
+  private readonly muteInput: HTMLInputElement;
   /** 「出現する種類」チェックボックス（種別 id と input のペア）。 */
   private readonly autoTypeChecks: Array<{ id: string; input: HTMLInputElement }> = [];
 
@@ -384,7 +385,26 @@ export class OptionsPanel {
     volumeValue.className = "cd-volume-value";
     volumeInput.addEventListener("input", () => this.onVolumeInput());
     volRow.append(volLabel, volumeInput, volumeValue);
-    volSection.append(volTitle, volRow);
+
+    // ミュート（映像のみモード）。音量スライダとは独立した一括ミュート。ON でも音量値は保持する
+    // （解除で元の音量に戻る）。「出現する種類」チェックボックスと同じ作り（cd-options-checkbox）。
+    // スライダは意図的に disabled にしない: 解除後の音量を事前調整できるようにするため。
+    const muteRow = document.createElement("div");
+    muteRow.className = "cd-options-row";
+    const muteLabel = document.createElement("label");
+    muteLabel.className = "cd-options-label";
+    muteLabel.textContent = "ミュート（映像のみ）";
+    muteLabel.htmlFor = "cd-mute-input";
+    const muteInput = document.createElement("input");
+    muteInput.type = "checkbox";
+    muteInput.id = "cd-mute-input";
+    muteInput.className = "cd-options-checkbox";
+    muteInput.addEventListener("change", () => {
+      this.settings.setMuted(muteInput.checked);
+    });
+    muteRow.append(muteLabel, muteInput);
+
+    volSection.append(volTitle, volRow, muteRow);
 
     card.appendChild(header);
     // 全画面対応環境でのみ「表示」セクションをヘッダ直後（モードセクションの前）へ差し込む。
@@ -413,6 +433,7 @@ export class OptionsPanel {
     this.critterFileInput = critterFileInput;
     this.volumeInput = volumeInput;
     this.volumeValue = volumeValue;
+    this.muteInput = muteInput;
 
     // Esc で閉じる（入力中にフォーカスがどこにあっても効くよう document で購読）。
     document.addEventListener("keydown", this.onKeyDown);
@@ -560,6 +581,14 @@ export class OptionsPanel {
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
+    this.syncMute(settings.muted);
+  }
+
+  /** ミュートチェックボックスを settings.muted から復元する（外部変更にも追従）。 */
+  private syncMute(muted: boolean): void {
+    if (this.muteInput.checked !== muted) {
+      this.muteInput.checked = muted;
+    }
   }
 
   /** 「出現する種類」チェックボックスを autoDisabledTypes から復元する（無効リストに無い＝ON）。 */

@@ -34,6 +34,11 @@ export type AudioManagerState = "unavailable" | AudioContextState;
 export interface AudioManagerOptions {
   /** master 音量(0..1)。既定 0.5。 */
   masterVolume?: number;
+  /**
+   * 一括ミュート（映像のみモード）。既定 false。true の間は master gain を 0 にして無音化するが、
+   * masterVolume 値そのものは保持する（ミュート解除で元の音量に戻る）。
+   */
+  muted?: boolean;
   /** AnalyserNode の fftSize（RMS 窓長）。既定 1024。 */
   analyserFftSize?: number;
 }
@@ -70,10 +75,12 @@ export class AudioManager implements AudioSink {
   private readonly oneShots = new Map<string, OneShotBuilder>();
   private readonly loops = new Map<string, LoopBuilder>();
   private masterVolumeValue: number;
+  private mutedValue: boolean;
   private resumeAttached = false;
 
   constructor(options?: AudioManagerOptions) {
     this.masterVolumeValue = clamp01(options?.masterVolume ?? DEFAULT_MASTER_VOLUME);
+    this.mutedValue = options?.muted ?? false;
 
     let ctx: AudioContext | null = null;
     let master: GainNode | null = null;
@@ -84,7 +91,8 @@ export class AudioManager implements AudioSink {
       if (Ctor) {
         ctx = new Ctor();
         master = ctx.createGain();
-        master.gain.value = this.masterVolumeValue;
+        // ミュート中は初期から 0（映像のみモードで起動時から無音）。音量値そのものは保持する。
+        master.gain.value = this.mutedValue ? 0 : this.masterVolumeValue;
         analyser = ctx.createAnalyser();
         analyser.fftSize = options?.analyserFftSize ?? DEFAULT_FFT_SIZE;
         timeData = new Float32Array(
@@ -117,17 +125,39 @@ export class AudioManager implements AudioSink {
     return this.ctx ? this.ctx.state : "unavailable";
   }
 
-  /** 現在の master 音量(0..1)。 */
+  /** 現在の master 音量(0..1)。ミュート中でも実音量値を返す（スライダ値の保持）。 */
   get masterVolume(): number {
     return this.masterVolumeValue;
+  }
+
+  /** 一括ミュート中か（映像のみモード）。 */
+  get muted(): boolean {
+    return this.mutedValue;
   }
 
   /** master 音量を設定（[0,1] にクランプ）。オプション画面から呼べる公開 API。 */
   setMasterVolume(value: number): void {
     this.masterVolumeValue = clamp01(value);
+    this.applyMasterGain();
+  }
+
+  /**
+   * 一括ミュートを設定する（映像のみモード）。masterVolume 値は変えず、実効ゲインだけ切り替える
+   * （解除で元の音量に戻る）。context 未生成時は状態のみ更新し安全に no-op。
+   */
+  setMuted(muted: boolean): void {
+    this.mutedValue = muted;
+    this.applyMasterGain();
+  }
+
+  /**
+   * 実効 master gain を現在の muted/masterVolume から反映する（ミュート中は 0）。
+   * context 未生成(available=false)なら安全に no-op（既存のガード流儀を維持）。
+   */
+  private applyMasterGain(): void {
     if (this.master && this.ctx) {
       this.master.gain.setTargetAtTime(
-        this.masterVolumeValue,
+        this.mutedValue ? 0 : this.masterVolumeValue,
         this.ctx.currentTime,
         MASTER_SMOOTH_TAU,
       );

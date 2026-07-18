@@ -9,12 +9,14 @@ import {
   DEFAULT_BACKGROUND_COLOR,
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
+  DEFAULT_MUTED,
   MAX_AUTO_PLAY_LIMIT_MINUTES,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
   normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeMode,
+  normalizeMuted,
   normalizeSettings,
   parseSettings,
   serializeSettings,
@@ -79,6 +81,22 @@ describe("normalizeMode", () => {
     expect(normalizeMode(undefined)).toBe("manual");
     expect(normalizeMode(null)).toBe("manual");
     expect(normalizeMode(1)).toBe("manual");
+  });
+});
+
+describe("normalizeMuted", () => {
+  it("真の boolean true のみ true", () => {
+    expect(normalizeMuted(true)).toBe(true);
+  });
+
+  it("false/欠損/型不一致は false（後方互換で音あり）", () => {
+    expect(normalizeMuted(false)).toBe(false);
+    expect(normalizeMuted(undefined)).toBe(false);
+    expect(normalizeMuted(null)).toBe(false);
+    expect(normalizeMuted(0)).toBe(false);
+    expect(normalizeMuted(1)).toBe(false);
+    expect(normalizeMuted("true")).toBe(false);
+    expect(normalizeMuted({})).toBe(false);
   });
 });
 
@@ -176,6 +194,7 @@ describe("createDefaultSettings", () => {
     expect(s).toEqual({
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
       masterVolume: DEFAULT_MASTER_VOLUME,
+      muted: DEFAULT_MUTED,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -183,6 +202,7 @@ describe("createDefaultSettings", () => {
       autoDisabledTypes: [],
     });
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
+    expect(DEFAULT_MUTED).toBe(false);
     expect(DEFAULT_MASTER_VOLUME).toBe(0.5);
     expect(DEFAULT_MODE).toBe("manual");
     expect(DEFAULT_AUTO_SPAWN_INTERVAL_MS).toBe(1500);
@@ -208,6 +228,7 @@ describe("normalizeSettings", () => {
       normalizeSettings({
         background: { type: "image", color: "#123", imageId: "bg-1" },
         masterVolume: 0.8,
+        muted: true,
         mode: "auto",
         autoSpawnIntervalMs: 900,
         autoPlayLimitMinutes: 15,
@@ -217,6 +238,7 @@ describe("normalizeSettings", () => {
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
       masterVolume: 0.8,
+      muted: true,
       mode: "auto",
       autoSpawnIntervalMs: 900,
       autoPlayLimitMinutes: 15,
@@ -266,6 +288,18 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ customCritterImageId: 7 }).customCritterImageId).toBeNull();
     expect(normalizeSettings({ customCritterImageId: null }).customCritterImageId).toBeNull();
     expect(normalizeSettings({ customCritterImageId: {} }).customCritterImageId).toBeNull();
+  });
+
+  it("muted は true のみ true、欠損/非boolは false（後方互換で音あり）", () => {
+    // 欠損はデフォルト false（フィールドを持たない旧 localStorage との後方互換）。
+    expect(normalizeSettings({}).muted).toBe(false);
+    // 真の true のみ受理。
+    expect(normalizeSettings({ muted: true }).muted).toBe(true);
+    // false/型不一致は false。
+    expect(normalizeSettings({ muted: false }).muted).toBe(false);
+    expect(normalizeSettings({ muted: "true" }).muted).toBe(false);
+    expect(normalizeSettings({ muted: 1 }).muted).toBe(false);
+    expect(normalizeSettings({ muted: null }).muted).toBe(false);
   });
 
   it("autoDisabledTypes は配列の文字列のみ・重複除去、非配列/欠損は []", () => {
@@ -326,6 +360,7 @@ describe("serializeSettings / parseSettings", () => {
     const original = {
       background: { type: "image" as const, color: "#abcdef", imageId: "bg-xyz" },
       masterVolume: 0.33,
+      muted: true,
       mode: "auto" as const,
       autoSpawnIntervalMs: 2400,
       autoPlayLimitMinutes: 10,
@@ -347,6 +382,7 @@ describe("serializeSettings / parseSettings", () => {
       "customCritterImageId",
       "masterVolume",
       "mode",
+      "muted",
     ]);
     expect(Object.keys(parsed.background as object).sort()).toEqual(["color", "imageId", "type"]);
   });
@@ -365,11 +401,25 @@ describe("serializeSettings / parseSettings", () => {
     expect(parseSettings('{"masterVolume":0.2}')).toEqual({
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
       masterVolume: 0.2,
+      muted: DEFAULT_MUTED,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
     });
+  });
+
+  it("muted 往復: true/false ともに保持し、フィールド無しの旧 JSON は false（後方互換）", () => {
+    // true → serialize → parse で保持。
+    const on = createDefaultSettings();
+    on.muted = true;
+    expect(parseSettings(serializeSettings(on)).muted).toBe(true);
+    // false も保持。
+    const off = createDefaultSettings();
+    off.muted = false;
+    expect(parseSettings(serializeSettings(off)).muted).toBe(false);
+    // muted フィールドを持たない旧 localStorage JSON は false へフォールバック。
+    expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').muted).toBe(false);
   });
 });

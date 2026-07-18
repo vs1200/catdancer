@@ -11,6 +11,7 @@ import {
   clampVolume,
   normalizeHexColor,
   normalizeMode,
+  normalizeMuted,
   parseSettings,
   serializeSettings,
 } from "./settingsData";
@@ -49,6 +50,7 @@ export class SettingsStore {
     return {
       background: { ...this.state.background },
       masterVolume: this.state.masterVolume,
+      muted: this.state.muted,
       mode: this.state.mode,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
       autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
@@ -151,6 +153,15 @@ export class SettingsStore {
   /** master 音量を設定する（[0,1] にクランプして永続化＋通知）。 */
   setMasterVolume(value: number): void {
     this.state.masterVolume = clampVolume(value);
+    this.commit();
+  }
+
+  /**
+   * 一括ミュート（映像のみモード）を設定する（永続化＋通知）。
+   * masterVolume 値は変えないため、解除で元の音量に戻る。
+   */
+  setMuted(muted: boolean): void {
+    this.state.muted = normalizeMuted(muted);
     this.commit();
   }
 

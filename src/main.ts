@@ -62,7 +62,10 @@ async function bootstrap(): Promise<void> {
   });
 
   // 音声基盤。合成SEを登録し、最初のユーザージェスチャで AudioContext を resume する導線を張る。
-  const audio = new AudioManager({ masterVolume: settings.settings.masterVolume });
+  const audio = new AudioManager({
+    masterVolume: settings.settings.masterVolume,
+    muted: settings.settings.muted,
+  });
   registerCritterSounds(audio);
   audio.attachAutoResume(window);
 
@@ -282,10 +285,15 @@ async function bootstrap(): Promise<void> {
   let prevInterval = settings.settings.autoSpawnIntervalMs;
   let prevPlayLimit = settings.settings.autoPlayLimitMinutes;
   let prevCustomCritterId = settings.settings.customCritterImageId;
+  let prevMuted = settings.settings.muted;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join(" ");
   settings.subscribe((next) => {
     audio.setMasterVolume(next.masterVolume);
+    if (next.muted !== prevMuted) {
+      prevMuted = next.muted;
+      audio.setMuted(next.muted);
+    }
     void backgroundController.apply(next);
     if (next.autoSpawnIntervalMs !== prevInterval) {
       prevInterval = next.autoSpawnIntervalMs;
@@ -323,6 +331,8 @@ async function bootstrap(): Promise<void> {
   // 起動時復元: 背景（色 or IDB 画像）と音量を適用。
   await backgroundController.apply(settings.settings);
   audio.setMasterVolume(settings.settings.masterVolume);
+  // ミュート状態も明示反映（options 経由で初期化済みでも冪等）。映像のみモードの reload 復元。
+  audio.setMuted(settings.settings.muted);
   // 起動時復元: カスタム画像クリッター（あれば IDB からロードして AutoMode に追加）。
   if (settings.settings.customCritterImageId) {
     await loadCustomCritter(settings.settings.customCritterImageId);
@@ -442,6 +452,7 @@ async function bootstrap(): Promise<void> {
       rms: () => audio.getRms(),
       peak: () => audio.getPeak(),
       master: () => audio.masterVolume,
+      muted: () => audio.muted,
       squeak: () => audio.playOneShot(MOUSE_SQUEAK_ID),
     };
   }

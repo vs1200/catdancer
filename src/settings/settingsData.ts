@@ -26,6 +26,11 @@ export interface AppSettings {
   background: BackgroundSettings;
   /** master 音量(0..1)。 */
   masterVolume: number;
+  /**
+   * 一括ミュート（映像のみモード）。既定 false。true の間は無音化するが masterVolume 値は保持する
+   * （解除で元の音量に戻る）。夜間や音に驚く猫向けに映像だけで遊ばせる用途。
+   */
+  muted: boolean;
   /** 表示モード（manual=マウス操作 / auto=猫用動画）。 */
   mode: AppMode;
   /** auto モードのオブジェクト出現間隔(ms)。 */
@@ -52,6 +57,8 @@ export interface AppSettings {
 export const DEFAULT_BACKGROUND_COLOR = "#ffffff";
 /** 既定の master 音量。 */
 export const DEFAULT_MASTER_VOLUME = 0.5;
+/** 既定のミュート状態（映像のみモード）。既定 false（音あり）。 */
+export const DEFAULT_MUTED = false;
 /** 既定の表示モード。 */
 export const DEFAULT_MODE: AppMode = "manual";
 /** auto モードの既定出現間隔(ms)。 */
@@ -104,6 +111,14 @@ export function clampVolume(value: unknown): number {
 /** 表示モードを正規化する。"auto" のみ auto、その他は既定(manual)。 */
 export function normalizeMode(value: unknown): AppMode {
   return value === "auto" ? "auto" : "manual";
+}
+
+/**
+ * ミュート状態を正規化する。真の boolean true のみ true、それ以外は false。
+ * （フィールドを持たない旧 localStorage との後方互換で欠損は false＝音あり。）
+ */
+export function normalizeMuted(value: unknown): boolean {
+  return value === true;
 }
 
 /**
@@ -160,6 +175,7 @@ export function createDefaultSettings(): AppSettings {
       imageId: null,
     },
     masterVolume: DEFAULT_MASTER_VOLUME,
+    muted: DEFAULT_MUTED,
     mode: DEFAULT_MODE,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
     autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -176,6 +192,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
     imageId: null,
   }),
   masterVolume: DEFAULT_MASTER_VOLUME,
+  muted: DEFAULT_MUTED,
   mode: DEFAULT_MODE,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -207,6 +224,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
   return {
     background: { type, color, imageId },
     masterVolume: clampVolume(obj.masterVolume),
+    muted: normalizeMuted(obj.muted),
     mode: normalizeMode(obj.mode),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
     autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
@@ -224,6 +242,7 @@ export function serializeSettings(settings: AppSettings): string {
       imageId: settings.background.imageId,
     },
     masterVolume: settings.masterVolume,
+    muted: settings.muted,
     mode: settings.mode,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
     autoPlayLimitMinutes: settings.autoPlayLimitMinutes,
