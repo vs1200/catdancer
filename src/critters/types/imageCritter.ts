@@ -22,19 +22,22 @@ const FALLBACK_CROSS_SPEED = 220;
  * - createAutoSpawn: planCrossSpawn(world, rng) → CrossMovement。
  * - createMovement: フォールバック（既定速度の CrossMovement）。
  *
+ * 注意: image critter は **textureUrl を描画に使わない**。AutoMode は呼び出し側が Assets.load 済みで
+ * addEntry に渡す bodyTexture を使うため、この型の textureUrl は消費されない。よって objectURL を
+ * 埋めず空文字プレースホルダを持たせる（objectURL の revoke は main.ts の保持変数のみが握る）。
+ *
  * @param id レジストリ登録 id（単一スロットでは固定 "custom"）。
- * @param textureUrl 表示テクスチャ URL（objectURL 等。呼び出し側が Assets.load 済みで渡す）。
  * @param baseSize 表示時の最大辺(px)。既定 {@link DEFAULT_IMAGE_CRITTER_BASE_SIZE}。
  */
 export function createImageCritterType(
   id: string,
-  textureUrl: string,
   baseSize: number = DEFAULT_IMAGE_CRITTER_BASE_SIZE,
 ): CritterType {
   return {
     id,
     displayName: "カスタム画像",
-    textureUrl,
+    // 描画に使わない死値。objectURL を埋めない（revoke は main.ts 側の保持変数が担う）。
+    textureUrl: "",
     baseSize,
     defaultFacing: 1,
     // 上下反転を絶対に起こさないため 'rotate' は使わず 'flip'（既定）＝水平反転のみ。

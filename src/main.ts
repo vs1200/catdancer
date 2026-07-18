@@ -1,6 +1,7 @@
-import { Assets, Texture } from "pixi.js";
+import { Assets, type Texture } from "pixi.js";
 import { BackgroundController } from "./app/BackgroundController";
 import { CatDancerApp } from "./app/CatDancerApp";
+import { textureFromImageWithin } from "./app/imageTexture";
 import { PointerInput } from "./app/PointerInput";
 import { DEFAULT_WORLD_MARGIN, Scene } from "./app/Scene";
 import { AudioManager } from "./audio/AudioManager";
@@ -150,7 +151,10 @@ async function bootstrap(): Promise<void> {
 
   /** imageId のカスタム画像をロードして種別登録＋AutoMode エントリ追加する（失敗時は安全に無視）。 */
   const loadCustomCritter = async (imageId: string): Promise<void> => {
-    const token = ++customCritterToken;
+    // token は「呼ばれた時点の最新値」を捕捉するだけ（進めない）。差し替え時は subscribe が
+    // 先に teardownCustomCritter() で token を進めて in-flight を無効化する（＝二重加算を避ける）。
+    // 起動時復元は teardown を挟まず直接呼ばれるが、その時点では in-flight が無いので捕捉のみで足りる。
+    const token = customCritterToken;
     let blob: Blob | null = null;
     try {
       blob = await getCritterImage(imageId);
@@ -164,14 +168,15 @@ async function bootstrap(): Promise<void> {
       return; // IDB に無い（削除済み/未対応）。
     }
     // blob objectURL は拡張子が無く Assets.load の loader 推定が効かないため、背景画像と同じく
-    // Image.decode → Texture.from でテクスチャ化する（拡張子非依存で確実）。
+    // Image.decode → Texture でテクスチャ化する（拡張子非依存で確実）。
+    // 画素寸法が上限超なら textureFromImageWithin が等比縮小してから Texture 化する（VRAM 保護）。
     const url = URL.createObjectURL(blob);
     let texture: Texture;
     try {
       const image = new Image();
       image.src = url;
       await image.decode();
-      texture = Texture.from(image);
+      texture = textureFromImageWithin(image);
     } catch {
       URL.revokeObjectURL(url);
       return;
@@ -186,7 +191,7 @@ async function bootstrap(): Promise<void> {
     if (hasCritterType(CUSTOM_CRITTER_TYPE_ID)) {
       unregisterCritterType(CUSTOM_CRITTER_TYPE_ID);
     }
-    registerCritterType(createImageCritterType(CUSTOM_CRITTER_TYPE_ID, url));
+    registerCritterType(createImageCritterType(CUSTOM_CRITTER_TYPE_ID));
     autoMode.addEntry({
       typeId: CUSTOM_CRITTER_TYPE_ID,
       bodyTexture: texture,

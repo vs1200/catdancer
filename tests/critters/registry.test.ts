@@ -161,9 +161,10 @@ describe("registry", () => {
 
 describe("createImageCritterType", () => {
   it("無回転(flip)・尻尾/sway なし・横断(CrossMovement)の画像クリッター型を生成する", () => {
-    const type = createImageCritterType("custom", "blob:fake-url");
+    const type = createImageCritterType("custom");
     expect(type.id).toBe("custom");
-    expect(type.textureUrl).toBe("blob:fake-url");
+    // image critter は textureUrl を描画に使わない（AutoMode は bodyTexture を使う）。死値は空文字。
+    expect(type.textureUrl).toBe("");
     expect(type.defaultFacing).toBe(1);
     expect(type.hasTail).toBe(false);
     expect(type.sway).toBeUndefined();
@@ -186,7 +187,7 @@ describe("createImageCritterType", () => {
   });
 
   it("baseSize を上書きできる", () => {
-    const type = createImageCritterType("custom", "blob:x", 120);
+    const type = createImageCritterType("custom", 120);
     expect(type.baseSize).toBe(120);
   });
 });

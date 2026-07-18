@@ -1,7 +1,8 @@
-import { Texture } from "pixi.js";
+import type { Texture } from "pixi.js";
 import { getImage } from "../settings/imageStore";
 import type { AppSettings } from "../settings/settingsData";
 import type { BackgroundLayer } from "./BackgroundLayer";
+import { textureFromImageWithin } from "./imageTexture";
 
 interface LoadedImage {
   texture: Texture;
@@ -99,14 +100,18 @@ export class BackgroundController {
   }
 }
 
-/** Blob から objectURL 経由で Texture を生成する（失敗時は url を revoke して throw）。 */
+/**
+ * Blob から objectURL 経由で Texture を生成する（失敗時は url を revoke して throw）。
+ * 背景は全画面 cover-fit で拡大されるため巨大画像の VRAM リスクが critter より大きい。
+ * 画素寸法が上限超なら textureFromImageWithin が等比縮小してから Texture 化する。
+ */
 async function loadTextureFromBlob(blob: Blob): Promise<LoadedImage> {
   const url = URL.createObjectURL(blob);
   try {
     const image = new Image();
     image.src = url;
     await image.decode();
-    const texture = Texture.from(image);
+    const texture = textureFromImageWithin(image);
     return { texture, url };
   } catch (error) {
     URL.revokeObjectURL(url);
