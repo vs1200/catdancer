@@ -2,6 +2,7 @@ import { Container } from "pixi.js";
 import type { Viewport, WorldBounds } from "../core/worldBounds";
 import { createWorldBounds } from "../core/worldBounds";
 import type { Critter } from "../critters/Critter";
+import { BackgroundLayer } from "./BackgroundLayer";
 
 /**
  * world margin(画面外バッファ)の fallback 値(px)。
@@ -20,10 +21,11 @@ export const DEFAULT_WORLD_MARGIN = 220;
 export class Scene {
   /** ステージへ追加するルート。 */
   readonly root: Container;
-  /** 背景レイヤ（当面単色運用のため空。背景画像/Graphics は後続タスク）。 */
+  /** 背景レイヤ Container（BackgroundLayer の描画物を格納。critter より背面）。 */
   readonly background: Container;
   /** critter レイヤ（前面）。 */
   readonly critters: Container;
+  private readonly backgroundLayerValue: BackgroundLayer;
   private worldBoundsValue: WorldBounds;
 
   constructor(viewport: Viewport, margin: number = DEFAULT_WORLD_MARGIN) {
@@ -33,6 +35,9 @@ export class Scene {
     // 背景を奥、critter を前面に。
     this.root.addChild(this.background);
     this.root.addChild(this.critters);
+    // 背景描画（単色 fill + 任意画像）を background 内に構築する。
+    this.backgroundLayerValue = new BackgroundLayer(viewport);
+    this.background.addChild(this.backgroundLayerValue.root);
     this.worldBoundsValue = createWorldBounds(viewport, margin);
   }
 
@@ -40,9 +45,15 @@ export class Scene {
     return this.worldBoundsValue;
   }
 
-  /** リサイズ時に world 領域を作り直す（margin は維持）。 */
+  /** 背景描画レイヤ（色/画像の適用は BackgroundController が駆動する）。 */
+  get backgroundLayer(): BackgroundLayer {
+    return this.backgroundLayerValue;
+  }
+
+  /** リサイズ時に world 領域を作り直し（margin 維持）、背景も再フィットする。 */
   resize(viewport: Viewport): void {
     this.worldBoundsValue = createWorldBounds(viewport, this.worldBoundsValue.margin);
+    this.backgroundLayerValue.resize(viewport);
   }
 
   add(critter: Critter): void {

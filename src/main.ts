@@ -1,4 +1,5 @@
 import { Assets } from "pixi.js";
+import { BackgroundController } from "./app/BackgroundController";
 import { CatDancerApp } from "./app/CatDancerApp";
 import { PointerInput } from "./app/PointerInput";
 import { DEFAULT_WORLD_MARGIN, Scene } from "./app/Scene";
@@ -10,6 +11,8 @@ import { getCritterType, listCritterTypes } from "./critters/registry";
 import { MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
 import { computeWorldMargin } from "./critters/worldMargin";
 import type { MovementContext } from "./movement/Movement";
+import { SettingsStore } from "./settings/SettingsStore";
+import type { AppSettings } from "./settings/settingsData";
 
 /**
  * catdancer エントリ（v1 マウス操作モード）。
@@ -24,11 +27,19 @@ async function bootstrap(): Promise<void> {
     throw new Error("マウント先 #app が見つかりません");
   }
 
-  const app = await CatDancerApp.create(mount);
+  // 設定を localStorage から復元（壊れた JSON はデフォルトへフォールバック）。
+  // 背景色/音量は以降この設定を単一の真実源として適用する。
+  const settings = new SettingsStore();
+
+  // 初期背景色を renderer 背景にも渡して初回描画のチラつき（既定色）を防ぐ。
+  const app = await CatDancerApp.create(mount, {
+    background: settings.settings.background.color,
+  });
 
   // 音声基盤。合成SEを登録し、最初のユーザージェスチャ(pointerdown/keydown/touchstart)で
   // AudioContext を resume する導線を張る（autoplay 制限対策。pointermove は gesture 無効）。
-  const audio = new AudioManager();
+  // master 音量は復元した設定を初期値にする。
+  const audio = new AudioManager({ masterVolume: settings.settings.masterVolume });
   registerCritterSounds(audio);
   audio.attachAutoResume(window);
 
@@ -39,6 +50,18 @@ async function bootstrap(): Promise<void> {
   const scene = new Scene(app.viewport, margin);
   app.stage.addChild(scene.root);
   app.onResize((viewport) => scene.resize(viewport));
+
+  // 背景設定 → 描画の橋渡し。設定変更/起動時復元の両方をこの apply 一本に集約する。
+  const backgroundController = new BackgroundController(scene.backgroundLayer);
+  // 設定変更を Scene（背景）と AudioManager（音量）へ反映する購読。
+  const applySettings = (next: AppSettings): void => {
+    audio.setMasterVolume(next.masterVolume);
+    void backgroundController.apply(next);
+  };
+  settings.subscribe(applySettings);
+  // 起動時復元: 現在の設定（色 or IDB からの画像 / 音量）を適用する。
+  await backgroundController.apply(settings.settings);
+  audio.setMasterVolume(settings.settings.masterVolume);
 
   // ポインタ入力を配線。起動時は viewport 中心を初期ポインタにしてネズミを画面内に出す。
   const pointerInput = new PointerInput(app.canvas, () => app.viewport);
@@ -68,6 +91,14 @@ async function bootstrap(): Promise<void> {
       speed: () => Math.hypot(critter.state.velocity.x, critter.state.velocity.y),
       // 任意タイミングで 1 発鳴らして RMS の跳ねを確認するための補助。
       squeak: () => audio.playOneShot(mouseType.sounds.voice ?? ""),
+    };
+    // 背景設定 API（オプション画面 #10 が呼ぶ形）を検証用に露出する。
+    // 例: __catSettings.setBackgroundColor('#cc3344') / setBackgroundImage(blob)
+    (window as unknown as { __catSettings?: unknown }).__catSettings = settings;
+    // 背景描画の実状態（cover-fit / resize 追従を eval で客観確認する）。
+    (window as unknown as { __catBg?: unknown }).__catBg = {
+      info: () => scene.backgroundLayer.debugInfo(),
+      settings: () => settings.settings,
     };
   }
 

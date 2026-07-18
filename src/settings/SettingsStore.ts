@@ -1,0 +1,181 @@
+import { pruneImagesExcept, putImage } from "./imageStore";
+import type { AppSettings, BackgroundType } from "./settingsData";
+import { clampVolume, normalizeHexColor, parseSettings, serializeSettings } from "./settingsData";
+
+/**
+ * アプリ設定を保持・購読・永続化するストア。
+ *
+ * - 設定 JSON（type/color/imageId/masterVolume）は localStorage に保存/復元する。
+ *   画像バイナリは容量的に IndexedDB（imageStore）へ。ここには入れない。
+ * - 変更は commit()（永続化 + 購読者通知）でまとめて反映し、Scene / AudioManager が
+ *   subscribe で追従する（ストアは描画/音声に直接依存しない）。
+ * - 敵対的ガード: localStorage/IndexedDB が失敗しても設定操作はクラッシュしない。
+ *   setBackgroundImage は IDB 保存に成功したときだけ type=image に切り替える。
+ *
+ * オプション画面(#10)はこのインスタンスの公開 API を呼ぶ。
+ */
+
+const STORAGE_KEY = "catdancer:settings";
+
+export type SettingsListener = (settings: AppSettings) => void;
+
+export class SettingsStore {
+  private state: AppSettings;
+  private readonly listeners = new Set<SettingsListener>();
+  private readonly storageKey: string;
+  /** 画像 I/O（IDB put/prune）を直列化するチェーン。 */
+  private imageOpChain: Promise<void> = Promise.resolve();
+
+  constructor(storageKey: string = STORAGE_KEY) {
+    this.storageKey = storageKey;
+    this.state = this.load();
+  }
+
+  /** 現在の設定のスナップショット（購読側からの直接改変を防ぐためコピーを返す）。 */
+  get settings(): AppSettings {
+    return {
+      background: { ...this.state.background },
+      masterVolume: this.state.masterVolume,
+    };
+  }
+
+  /** 変更通知を購読する。返り値を呼ぶと解除。 */
+  subscribe(listener: SettingsListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** 背景を単色に切り替え、色を設定する（hex 不正時は現状色を維持）。 */
+  setBackgroundColor(hex: string): void {
+    this.state.background.color = normalizeHexColor(hex, this.state.background.color);
+    this.state.background.type = "color";
+    this.commit();
+  }
+
+  /**
+   * 背景をユーザー画像に設定する。Blob を IndexedDB へ保存してから type=image・imageId を更新する。
+   * IDB 保存に失敗した場合は設定を変更しない（ガード）。
+   *
+   * 画像 I/O は enqueueImageOp で直列化する。連続呼び出しでも put→commit→掃除 が
+   * 割り込まれないため、取りこぼし orphan も、古い掃除が現行画像を誤削除する事故も起きない
+   * （常に最後の呼び出しが勝ち、IDB には現行 1 枚だけが残る）。
+   */
+  setBackgroundImage(blob: Blob): Promise<void> {
+    return this.enqueueImageOp(async () => {
+      const id = generateImageId();
+      try {
+        await putImage(id, blob);
+      } catch (error) {
+        console.warn("背景画像の保存に失敗しました。設定は変更しません。", error);
+        return;
+      }
+      this.state.background.imageId = id;
+      this.state.background.type = "image";
+      this.commit();
+      // 保持するのは常にこの 1 枚のみ。旧画像/残骸をまとめて掃除する。
+      await pruneImagesExcept(id);
+    });
+  }
+
+  /** 背景の種類だけを切り替える（imageId は保持。UI のトグル用）。 */
+  setBackgroundType(type: BackgroundType): void {
+    this.state.background.type = type;
+    this.commit();
+  }
+
+  /** ユーザー画像を破棄して単色に戻す（IDB の画像も全削除）。画像 I/O は直列化する。 */
+  clearBackgroundImage(): Promise<void> {
+    return this.enqueueImageOp(async () => {
+      this.state.background.imageId = null;
+      this.state.background.type = "color";
+      this.commit();
+      // 画像は保持しないので IDB を全掃除する。
+      await pruneImagesExcept(null);
+    });
+  }
+
+  /** master 音量を設定する（[0,1] にクランプして永続化＋通知）。 */
+  setMasterVolume(value: number): void {
+    this.state.masterVolume = clampVolume(value);
+    this.commit();
+  }
+
+  /**
+   * 画像 I/O を前操作の完了後に直列実行する。前操作が失敗してもチェーンは継続する
+   * （次の操作を止めない）。返す Promise は当該操作の完了で解決する。
+   */
+  private enqueueImageOp(op: () => Promise<void>): Promise<void> {
+    const run = this.imageOpChain.then(op, op);
+    this.imageOpChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private load(): AppSettings {
+    return parseSettings(readLocalStorage(this.storageKey));
+  }
+
+  private commit(): void {
+    this.persist();
+    this.notify();
+  }
+
+  private persist(): void {
+    try {
+      writeLocalStorage(this.storageKey, serializeSettings(this.state));
+    } catch (error) {
+      // 容量超過/プライベートモード等。永続化は諦めるが状態は保つ。
+      console.warn("設定の永続化に失敗しました。", error);
+    }
+  }
+
+  private notify(): void {
+    const snapshot = this.settings;
+    for (const listener of this.listeners) {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        // 購読者の例外で他購読者やストアを巻き込まない。
+        console.warn("設定購読者の処理でエラーが発生しました。", error);
+      }
+    }
+  }
+}
+
+/** 画像 ID を生成する（crypto.randomUUID 優先、非対応環境はフォールバック）。 */
+function generateImageId(): string {
+  try {
+    const c = (globalThis as { crypto?: Crypto }).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `bg-${c.randomUUID()}`;
+    }
+  } catch {
+    // crypto 参照が例外になる環境ではフォールバックへ。
+  }
+  return `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readLocalStorage(key: string): string | null {
+  try {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    return localStorage.getItem(key);
+  } catch {
+    // アクセス自体が例外になる環境（プライベートモード等）。
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string, value: string): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(key, value);
+}
+
+export { STORAGE_KEY };
