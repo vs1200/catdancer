@@ -6,6 +6,12 @@ import type { Movement, MovementContext } from "./Movement";
 /** ゼロ割ガード用の微小値。 */
 const EPS = 1e-6;
 
+/**
+ * exit を world 端から押し出す最小クリアランス(px)。size=0 でも exit が world 境界上
+ * (isInsideWorld は inclusive) に留まらず必ず strictly outside になるようにし、despawn を保証する。
+ */
+const MIN_EXIT_CLEARANCE = 1;
+
 /** 出現/退場の辺。 */
 export type ErraticEdge = "left" | "right" | "top" | "bottom";
 
@@ -240,17 +246,22 @@ function edgeEnter(world: WorldBounds, edge: ErraticEdge, inner: Vec2): Vec2 {
   }
 }
 
-/** 指定 edge の world 外（size ぶん外側）へ内側点 inner と同軸の退場点を置く（確実に despawn）。 */
+/**
+ * 指定 edge の world 外へ内側点 inner と同軸の退場点を置く（確実に despawn）。
+ * 押し出し量は max(size, MIN_EXIT_CLEARANCE)＝size=0 でも最低 1px 外側へ出し、world 境界上
+ * (inclusive で inside 扱い) に留まらないようにする（size に依らず strictly outside を保証）。
+ */
 function edgeExit(world: WorldBounds, edge: ErraticEdge, inner: Vec2, size: number): Vec2 {
+  const push = Math.max(size, MIN_EXIT_CLEARANCE);
   switch (edge) {
     case "left":
-      return { x: world.minX - size, y: inner.y };
+      return { x: world.minX - push, y: inner.y };
     case "right":
-      return { x: world.maxX + size, y: inner.y };
+      return { x: world.maxX + push, y: inner.y };
     case "top":
-      return { x: inner.x, y: world.minY - size };
+      return { x: inner.x, y: world.minY - push };
     default:
-      return { x: inner.x, y: world.maxY + size };
+      return { x: inner.x, y: world.maxY + push };
   }
 }
 
@@ -262,8 +273,8 @@ function edgeExit(world: WorldBounds, edge: ErraticEdge, inner: Vec2, size: numb
  *   jitterAmp, jitterFreq, jitterPhase, exitEdge, [wpX, wpY] * n
  *
  * - waypoint は viewport の inset 内に散らす（無限遠へ飛ばさない＝概ね viewport 近辺に留まる）。
- * - enter は enterEdge の world 端上で wp0 と同軸、exit は exitEdge の world 外へ size ぶん押し出す
- *   （size>0 なら exit は必ず world 外＝寿命後に確実に despawn）。
+ * - enter は enterEdge の world 端上で wp0 と同軸、exit は exitEdge の world 外へ押し出す
+ *   （size に依らず必ず strictly outside＝寿命後に確実に despawn。押し出し量は edgeExit 参照）。
  */
 export function planErraticSpawn(
   world: WorldBounds,

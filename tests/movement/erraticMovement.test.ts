@@ -273,3 +273,31 @@ describe("planErraticSpawn + ErraticMovement 統合", () => {
     expect(hasExitedWorld(state.position, world)).toBe(true);
   });
 });
+
+describe("planErraticSpawn exit は size に依らず全 edge で world 外(despawn 保証)", () => {
+  // rng 消費順の先頭 9 個(enterEdge..jitterPhase)を 0.5 に固定し、10 個目(exitEdge)で退場辺を選ぶ。
+  // size=0（既定/退化ケース）でも exit が world 境界上に留まらず strictly outside になることを保証する。
+  const withExitEdge = (edgeSel: number, size: number) =>
+    planErraticSpawn(
+      world,
+      seqRng([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, edgeSel]),
+      ERRATIC_SPAWN_DEFAULTS,
+      size,
+    );
+
+  const edges: ReadonlyArray<readonly [string, number]> = [
+    ["left", 0.1],
+    ["right", 0.3],
+    ["top", 0.6],
+    ["bottom", 0.9],
+  ];
+
+  for (const [name, sel] of edges) {
+    it(`size=0 でも ${name} 辺の exit は world 外`, () => {
+      expect(hasExitedWorld(withExitEdge(sel, 0).exit, world)).toBe(true);
+    });
+    it(`size=${SIZE} でも ${name} 辺の exit は world 外`, () => {
+      expect(hasExitedWorld(withExitEdge(sel, SIZE).exit, world)).toBe(true);
+    });
+  }
+});
