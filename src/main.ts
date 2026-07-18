@@ -7,6 +7,7 @@ import { AudioManager } from "./audio/AudioManager";
 import { MOUSE_SQUEAK_ID, registerCritterSounds } from "./audio/sounds";
 import { getCritterType, listCritterTypes } from "./critters/registry";
 import { FOXTAIL_TYPE_ID, registerFoxtailType } from "./critters/types/foxtail";
+import { INSECT_TYPE_ID, registerInsectType } from "./critters/types/insect";
 import { MOUSE_TAIL_TEXTURE_URL, MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "./critters/types/toys";
 import { computeWorldMargin } from "./critters/worldMargin";
@@ -53,6 +54,7 @@ async function bootstrap(): Promise<void> {
   registerMouseType();
   registerFoxtailType();
   registerToysType();
+  registerInsectType();
   const margin = computeWorldMargin(listCritterTypes(), DEFAULT_WORLD_MARGIN);
 
   const scene = new Scene(app.viewport, margin);
@@ -68,10 +70,12 @@ async function bootstrap(): Promise<void> {
   const mouseType = getCritterType(MOUSE_TYPE_ID);
   const foxtailType = getCritterType(FOXTAIL_TYPE_ID);
   const toysType = getCritterType(TOYS_TYPE_ID);
-  const [bodyTexture, foxtailTexture, toysTexture, tailTexture] = await Promise.all([
+  const insectType = getCritterType(INSECT_TYPE_ID);
+  const [bodyTexture, foxtailTexture, toysTexture, insectTexture, tailTexture] = await Promise.all([
     Assets.load(mouseType.textureUrl),
     Assets.load(foxtailType.textureUrl),
     Assets.load(toysType.textureUrl),
+    Assets.load(insectType.textureUrl),
     Assets.load(MOUSE_TAIL_TEXTURE_URL),
   ]);
 
@@ -89,13 +93,14 @@ async function bootstrap(): Promise<void> {
     typeId: MOUSE_TYPE_ID,
   });
   // AutoMode は登録済みの auto 対象種別を重み付きでミックス出現させる。
-  // mouse=横断、foxtail/toys=揺れて誘い縁へ退場。重みで出現頻度を調整する。
+  // mouse=横断、foxtail/toys=揺れて誘い縁へ退場、insect=不規則ダッシュ。重みで出現頻度を調整する。
   const autoMode = new AutoMode({
     scene,
     entries: [
       { typeId: MOUSE_TYPE_ID, bodyTexture, tailTexture, weight: 2 },
       { typeId: FOXTAIL_TYPE_ID, bodyTexture: foxtailTexture, weight: 1.5 },
       { typeId: TOYS_TYPE_ID, bodyTexture: toysTexture, weight: 1.5 },
+      { typeId: INSECT_TYPE_ID, bodyTexture: insectTexture, weight: 2 },
     ],
     audio,
     sounds: mouseType.sounds,

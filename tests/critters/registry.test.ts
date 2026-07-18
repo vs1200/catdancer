@@ -10,11 +10,13 @@ import {
   registerCritterType,
 } from "../../src/critters/registry";
 import { FOXTAIL_TYPE_ID, registerFoxtailType } from "../../src/critters/types/foxtail";
+import { INSECT_TYPE_ID, registerInsectType } from "../../src/critters/types/insect";
 import { MOUSE_TYPE_ID, registerMouseType } from "../../src/critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "../../src/critters/types/toys";
 import { CrossMovement } from "../../src/movement/CrossMovement";
 import { DangleMovement } from "../../src/movement/DangleMovement";
 import { DriftMovement } from "../../src/movement/DriftMovement";
+import { ErraticMovement } from "../../src/movement/ErraticMovement";
 import { MouseFollowMovement } from "../../src/movement/MouseFollowMovement";
 
 // テスト用のダミー種別（PixiJS 非依存）。
@@ -115,5 +117,31 @@ describe("registry", () => {
     expect(foxtail.sway?.pivot.y).toBeGreaterThan(0.5); // 下寄り
     const toys = getCritterType(TOYS_TYPE_ID);
     expect(toys.sway?.pivot.x).toBeLessThan(0.2); // 柄の端＝左寄り
+  });
+
+  it("registerInsectType は虫種別を登録する（rotate・尻尾/sway なし・不規則ダッシュ）", () => {
+    registerInsectType();
+    const insect = getCritterType(INSECT_TYPE_ID);
+    expect(insect.id).toBe("insect");
+    expect(insect.displayName).toBe("虫");
+    expect(insect.hasTail).toBe(false);
+    expect(insect.sway).toBeUndefined();
+    expect(insect.defaultFacing).toBe(1);
+    expect(insect.faceMode).toBe("rotate"); // ダッシュ方向へ回頭
+    expect(insect.baseSize).toBeLessThanOrEqual(64); // 小さめ
+    expect(insect.textureUrl).toContain("assets/critters/insect.webp");
+    // フォールバック / AutoMode どちらも ErraticMovement。
+    expect(insect.createMovement()).toBeInstanceOf(ErraticMovement);
+    const world = createWorldBounds({ width: 800, height: 600 }, 300);
+    const plan = insect.createAutoSpawn?.(world, () => 0.5);
+    expect(plan?.movement).toBeInstanceOf(ErraticMovement);
+    // spawn 位置は world 内（初フレームで即 despawn しない）。
+    expect(plan).toBeDefined();
+    if (plan) {
+      expect(plan.position.x).toBeGreaterThanOrEqual(world.minX);
+      expect(plan.position.x).toBeLessThanOrEqual(world.maxX);
+      expect(plan.position.y).toBeGreaterThanOrEqual(world.minY);
+      expect(plan.position.y).toBeLessThanOrEqual(world.maxY);
+    }
   });
 });
