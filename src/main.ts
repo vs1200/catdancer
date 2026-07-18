@@ -116,7 +116,6 @@ async function bootstrap(): Promise<void> {
       { typeId: INSECT_TYPE_ID, bodyTexture: insectTexture, weight: 2 },
     ],
     audio,
-    sounds: mouseType.sounds,
     intervalMs: settings.settings.autoSpawnIntervalMs,
   });
 

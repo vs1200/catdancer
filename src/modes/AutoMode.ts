@@ -2,9 +2,9 @@ import type { Texture } from "pixi.js";
 import type { Scene } from "../app/Scene";
 import type { AudioSink } from "../audio/AudioManager";
 import { CritterAudioController } from "../audio/CritterAudioController";
+import { type CritterAudioState, driveForType, groupMaxSpeedByType } from "../audio/perTypeLevels";
 import type { Critter } from "../critters/Critter";
 import { spawnCritter } from "../critters/Critter";
-import type { CritterSoundSet } from "../critters/CritterType";
 import { getCritterType } from "../critters/registry";
 import { hasExitedWorld } from "../movement/CrossMovement";
 import type { MovementContext } from "../movement/Movement";
@@ -32,8 +32,6 @@ export interface AutoModeDeps {
   /** 出現させる種別群（mouse / foxtail / toys ...）。重みで選んで spawn する。 */
   entries: AutoModeEntry[];
   audio: AudioSink;
-  /** 共有SE（当面は全種別で流用。オブジェクト別SEは次タスク）。 */
-  sounds: CritterSoundSet;
   /** 出現間隔(ms)。 */
   intervalMs: number;
   /** 同時上限（既定 12）。 */
@@ -52,13 +50,21 @@ export interface AutoModeDeps {
  * - despawn 述語は 1 度だけ束縛（this.shouldDespawn）して毎フレームの new を避ける。
  * - 生成物は全て Scene のアクティブ集合に載せ、stop で despawnAll し完全解放する。
  * - 種別ごとの spawn 計画・Movement は CritterType.createAutoSpawn に委譲（種別追加が容易）。
- * SE は共有コントローラで最大速度連動＋断続チューチューを鳴らす（種別別SEは次タスク）。
+ *
+ * SE は種別別ルーティング: sounds を持つ種別ごとに CritterAudioController を 1 本保持し
+ * （Map<typeId, controller>）、毎フレーム画面上の critter を typeId でグループ化して
+ * 「その種別が居るか(present)＋その種別の最大速度」で各コントローラを駆動する。present でない種別は
+ * move レベル0・voice 非発火にするので、虫だけの時にネズミのチューが混ざる等が起きない。
+ * voice も move も無い種別（custom 等）はコントローラを作らず無音のまま。
  */
 export class AutoMode implements Mode {
   private readonly deps: AutoModeDeps;
   private readonly scheduler: SpawnScheduler;
   private readonly ctx: MovementContext;
-  private readonly audioCtrl: CritterAudioController;
+  /** 種別別SEコントローラ（sounds を持つ種別のみ）。start/stop/駆動を種別ごとに行う。 */
+  private readonly audioCtrls = new Map<string, CritterAudioController>();
+  /** 毎フレームの種別グループ化で使う再利用バッファ（配列を作り直さない）。 */
+  private readonly audioStateBuf: CritterAudioState[] = [];
   private readonly rng: () => number;
   private readonly maxActive: number;
   /** entries に対応する重み配列（毎フレーム再生成しないよう保持）。 */
@@ -76,7 +82,32 @@ export class AutoMode implements Mode {
     this.weights = deps.entries.map((e) => e.weight);
     this.scheduler = new SpawnScheduler({ intervalMs: deps.intervalMs });
     this.ctx = { world: deps.scene.worldBounds, pointer: null };
-    this.audioCtrl = new CritterAudioController(deps.audio, deps.sounds);
+    // sounds を持つ種別ごとにコントローラを用意する（無音種別は作らない）。
+    for (let i = 0; i < deps.entries.length; i++) {
+      this.ensureController(deps.entries[i].typeId);
+    }
+  }
+
+  /**
+   * 指定 typeId の SE コントローラを（未生成なら）用意する。
+   * sounds に voice も move も無い種別はコントローラを作らない（custom 等は無音のまま）。
+   * running 中に用意したものは即 start する（実行中の addEntry に追随）。
+   */
+  private ensureController(typeId: string): void {
+    if (this.audioCtrls.has(typeId)) {
+      return;
+    }
+    const type = getCritterType(typeId);
+    if (!type.sounds.voice && !type.sounds.move) {
+      return;
+    }
+    const ctrl = new CritterAudioController(this.deps.audio, type.sounds, {
+      scurry: type.moveLevel,
+    });
+    this.audioCtrls.set(typeId, ctrl);
+    if (this.running) {
+      ctrl.start();
+    }
   }
 
   start(): void {
@@ -86,7 +117,9 @@ export class AutoMode implements Mode {
     this.running = true;
     this.paused = false;
     this.scheduler.reset();
-    this.audioCtrl.start();
+    for (const ctrl of this.audioCtrls.values()) {
+      ctrl.start();
+    }
     // 起動直後に 1 体出して即フィードバックを与える。
     this.spawnOne();
   }
@@ -97,7 +130,9 @@ export class AutoMode implements Mode {
     }
     this.running = false;
     this.deps.scene.despawnAll();
-    this.audioCtrl.stop();
+    for (const ctrl of this.audioCtrls.values()) {
+      ctrl.stop();
+    }
   }
 
   setPaused(paused: boolean): void {
@@ -119,10 +154,12 @@ export class AutoMode implements Mode {
     if (idx >= 0) {
       this.deps.entries[idx] = entry;
       this.weights[idx] = entry.weight;
-      return;
+    } else {
+      this.deps.entries.push(entry);
+      this.weights.push(entry.weight);
     }
-    this.deps.entries.push(entry);
-    this.weights.push(entry.weight);
+    // sounds を持つ種別なら SE コントローラを用意（running 中なら即 start）。
+    this.ensureController(entry.typeId);
   }
 
   /** 指定 typeId の種別エントリを取り除く（未登録は no-op。実行中でも即反映）。 */
@@ -133,6 +170,12 @@ export class AutoMode implements Mode {
     }
     this.deps.entries.splice(idx, 1);
     this.weights.splice(idx, 1);
+    // 対応する SE コントローラを停止して破棄する（不在種別のループを残さない）。
+    const ctrl = this.audioCtrls.get(typeId);
+    if (ctrl) {
+      ctrl.stop();
+      this.audioCtrls.delete(typeId);
+    }
   }
 
   update(dtSeconds: number): void {
@@ -150,19 +193,19 @@ export class AutoMode implements Mode {
     scene.updateAll(dtSeconds, this.ctx);
     // 3) world 外へ抜けたものを despawn（完全破棄）。
     scene.despawnWhere(this.shouldDespawn);
-    // 4) SE: 最大速度で走行音、断続でチューチュー（critter が居るときのみ進める）。
-    const count = scene.critterCount;
-    if (count > 0) {
-      let maxSpeed = 0;
-      const list = scene.critterList;
-      for (let i = 0; i < list.length; i++) {
-        const v = list[i].state.velocity;
-        const s = Math.hypot(v.x, v.y);
-        if (s > maxSpeed) {
-          maxSpeed = s;
-        }
-      }
-      this.audioCtrl.update(maxSpeed, dtSeconds);
+    // 4) SE: 種別別ルーティング。画面上の critter を typeId でグループ化し、各コントローラを
+    //    「その種別の在否(present)＋最大速度」で駆動する。present でない種別は無音（他種別が居ても
+    //    その種別のSEは鳴らさない）。
+    const buf = this.audioStateBuf;
+    buf.length = 0;
+    const list = scene.critterList;
+    for (let i = 0; i < list.length; i++) {
+      buf.push(list[i].state);
+    }
+    const maxByType = groupMaxSpeedByType(buf);
+    for (const [typeId, ctrl] of this.audioCtrls) {
+      const drive = driveForType(maxByType, typeId);
+      ctrl.update(drive.maxSpeed, dtSeconds, drive.present);
     }
   }
 

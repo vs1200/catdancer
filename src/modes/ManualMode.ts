@@ -2,6 +2,7 @@ import type { Texture } from "pixi.js";
 import type { PointerInput } from "../app/PointerInput";
 import type { Scene } from "../app/Scene";
 import type { AudioSink } from "../audio/AudioManager";
+import { SCURRY_LEVEL_MOUSE_FOLLOW } from "../audio/audioMath";
 import { CritterAudioController } from "../audio/CritterAudioController";
 import type { Critter } from "../critters/Critter";
 import { spawnCritter } from "../critters/Critter";
@@ -39,7 +40,10 @@ export class ManualMode implements Mode {
   constructor(deps: ManualModeDeps) {
     this.deps = deps;
     this.ctx = { world: deps.scene.worldBounds, pointer: null };
-    this.audioCtrl = new CritterAudioController(deps.audio, deps.sounds);
+    // ポインタ追従はピーク速度が大きい(~3600)ため、走行音写像は上方調整版で抑揚を残す。
+    this.audioCtrl = new CritterAudioController(deps.audio, deps.sounds, {
+      scurry: SCURRY_LEVEL_MOUSE_FOLLOW,
+    });
   }
 
   start(): void {
@@ -100,7 +104,8 @@ export class ManualMode implements Mode {
     this.ctx.pointer = this.deps.pointer.pointer.value;
     this.critter.update(dtSeconds, this.ctx);
     const speed = Math.hypot(this.critter.state.velocity.x, this.critter.state.velocity.y);
-    this.audioCtrl.update(speed, dtSeconds);
+    // ネズミ 1 体で常に存在するため present=true 固定。
+    this.audioCtrl.update(speed, dtSeconds, true);
   }
 
   /**

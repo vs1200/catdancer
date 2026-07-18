@@ -46,8 +46,17 @@ export class CritterAudioController {
     }
   }
 
-  /** 毎フレーム: 速さ(px/秒)で走行音 gain を更新し、チューチューを断続発火する。 */
-  update(speed: number, dtSeconds: number): void {
+  /**
+   * 毎フレーム: 速さ(px/秒)で走行音 gain を更新し、チューチューを断続発火する。
+   * present=false（この種別の critter が画面に居ない）のときは move レベル0・voice 非発火にし、
+   * 他種別が居てもこの種別のSEが鳴らないようにする（種別別ルーティングの在否ゲート）。
+   */
+  update(speed: number, dtSeconds: number, present: boolean): void {
+    if (!present) {
+      this.currentLevel = 0;
+      this.moveVoice?.setLevel(0);
+      return;
+    }
     this.currentLevel = scurryLevelFromSpeed(speed, this.scurryOpts);
     this.moveVoice?.setLevel(this.currentLevel);
     if (this.sounds.voice && this.scheduler.update(dtSeconds)) {

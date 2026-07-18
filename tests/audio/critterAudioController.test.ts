@@ -58,13 +58,13 @@ describe("CritterAudioController", () => {
     );
     ctrl.start();
 
-    ctrl.update(0, 1 / 60);
+    ctrl.update(0, 1 / 60, true);
     expect(ctrl.scurryLevel).toBe(0);
 
-    ctrl.update(70, 1 / 60);
+    ctrl.update(70, 1 / 60, true);
     expect(ctrl.scurryLevel).toBeCloseTo(0.5, 6);
 
-    ctrl.update(9999, 1 / 60);
+    ctrl.update(9999, 1 / 60, true);
     expect(ctrl.scurryLevel).toBe(1);
 
     // setLevel は start の 0 に続いて各 update ぶん呼ばれている。
@@ -82,9 +82,9 @@ describe("CritterAudioController", () => {
     ctrl.start();
 
     // 速度 0（静止）でも時間が来れば鳴る。
-    ctrl.update(0, 0.5);
+    ctrl.update(0, 0.5, true);
     expect(f.fired).toHaveLength(0);
-    ctrl.update(0, 0.6); // 累積 1.1s > 1s → 発火
+    ctrl.update(0, 0.6, true); // 累積 1.1s > 1s → 発火
     expect(f.fired).toEqual(["squeak"]);
   });
 
@@ -96,7 +96,7 @@ describe("CritterAudioController", () => {
       { squeak: { minInterval: 0.1, maxInterval: 0.1, rng: () => 0 } },
     );
     ctrl.start();
-    ctrl.update(0, 1);
+    ctrl.update(0, 1, true);
     expect(f.fired).toHaveLength(0);
   });
 
@@ -104,10 +104,35 @@ describe("CritterAudioController", () => {
     const f = makeFakeSink();
     const ctrl = new CritterAudioController(f.sink, { voice: "v" });
     ctrl.start();
-    ctrl.update(500, 1 / 60);
+    ctrl.update(500, 1 / 60, true);
     expect(f.loopsCreated).toBe(0);
     expect(f.levels).toHaveLength(0);
     // レベル計算自体は行われる（デバッグ表示用）。
     expect(ctrl.scurryLevel).toBe(1);
+  });
+
+  it("present=false のとき move レベルを 0 にし voice を鳴らさない（在否ゲート）", () => {
+    const f = makeFakeSink();
+    const ctrl = new CritterAudioController(
+      f.sink,
+      { voice: "squeak", move: "m" },
+      {
+        scurry: { minSpeed: 20, maxSpeed: 120 },
+        squeak: { minInterval: 0.1, maxInterval: 0.1, rng: () => 0 },
+      },
+    );
+    ctrl.start();
+    // 高速でも present=false なら走行音レベルは 0（＝この種別のSEは鳴らさない）。
+    ctrl.update(9999, 1, false);
+    expect(ctrl.scurryLevel).toBe(0);
+    // start の 0 に続いて present=false でも 0 を設定する。
+    expect(f.levels.at(-1)).toBe(0);
+    // present=false の間は時間が経っても voice を鳴らさない。
+    expect(f.fired).toHaveLength(0);
+
+    // present=true に戻れば通常どおり駆動する（レベル上昇＋voice 発火）。
+    ctrl.update(9999, 1, true);
+    expect(ctrl.scurryLevel).toBe(1);
+    expect(f.fired).toEqual(["squeak"]);
   });
 });
