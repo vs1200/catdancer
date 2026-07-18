@@ -28,8 +28,11 @@ async function bootstrap(): Promise<void> {
   const mouseType = getCritterType(MOUSE_TYPE_ID);
   const texture = await Assets.load(mouseType.textureUrl);
 
+  // smoke: 横方向に速めの初速を与え、world 端で跳ね返って向き反転＋尻尾の揺れが
+  // スクショで確認できるようにする（本命のマウス追従は次タスク）。
   const critter = createCritter(MOUSE_TYPE_ID, texture, {
     position: { x: app.viewport.width / 2, y: app.viewport.height / 2 },
+    velocity: { x: 240, y: 50 },
   });
   scene.add(critter);
 

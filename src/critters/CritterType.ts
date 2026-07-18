@@ -13,6 +13,32 @@ export interface CritterSoundSet {
 }
 
 /**
+ * 尻尾(MeshRope)の種別ごとの設定。
+ * attach は本体テクスチャの正規化座標(0..1, 左上原点)。各 *Factor は表示幅に対する比率で、
+ * サイズ変更に追従できるようにしている。実 px 変換と点列生成は tail/RopeTail が担う。
+ */
+export interface TailConfig {
+  /** 付け根の付き位置（本体テクスチャ正規化座標, 0..1）。 */
+  readonly attach: { readonly x: number; readonly y: number };
+  /** 尻尾全長 = lengthFactor * 表示幅。 */
+  readonly lengthFactor: number;
+  /** 付け根の太さ = thicknessFactor * 表示幅。 */
+  readonly thicknessFactor: number;
+  /** 先端の揺れ振幅 = amplitudeFactor * 表示幅。 */
+  readonly amplitudeFactor: number;
+  /** 静止時の垂れ = sagFactor * 表示幅。 */
+  readonly sagFactor: number;
+  /** 点数 N（MeshRope 分割数, 2 以上）。 */
+  readonly pointCount: number;
+  /** 長さ方向の空間波数。 */
+  readonly waveCount: number;
+  /** 時間方向の角速度(rad/秒)。 */
+  readonly speed: number;
+  /** 振幅の先端方向への増大指数(>=1)。 */
+  readonly amplitudeExponent: number;
+}
+
+/**
  * 種別定義。新オブジェクトは「この型を1つ定義 + アセット」で追加できる。
  */
 export interface CritterType {
@@ -30,6 +56,8 @@ export interface CritterType {
   readonly createMovement: () => Movement;
   /** SE セット（プレースホルダ）。 */
   readonly sounds: CritterSoundSet;
-  /** 尻尾(MeshRope)など特殊描画が必要か。尻尾実装は次タスク。 */
+  /** 尻尾(MeshRope)など特殊描画が必要か。 */
   readonly hasTail: boolean;
+  /** 尻尾設定。hasTail=true のとき参照する。 */
+  readonly tail?: TailConfig;
 }
