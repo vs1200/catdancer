@@ -118,6 +118,8 @@ async function bootstrap(): Promise<void> {
     audio,
     intervalMs: settings.settings.autoSpawnIntervalMs,
   });
+  // auto 出現の無効化種別を初期反映（reload 復元）。オプションの「出現する種類」ON/OFFに対応。
+  autoMode.setDisabledTypes(settings.settings.autoDisabledTypes);
 
   // --- ユーザー任意画像クリッター（単一スロット）の動的ロード/破棄 ---
   // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Assets.load →
@@ -215,12 +217,19 @@ async function bootstrap(): Promise<void> {
   let prevMode = settings.settings.mode;
   let prevInterval = settings.settings.autoSpawnIntervalMs;
   let prevCustomCritterId = settings.settings.customCritterImageId;
+  // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
+  let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join(" ");
   settings.subscribe((next) => {
     audio.setMasterVolume(next.masterVolume);
     void backgroundController.apply(next);
     if (next.autoSpawnIntervalMs !== prevInterval) {
       prevInterval = next.autoSpawnIntervalMs;
       autoMode.setInterval(next.autoSpawnIntervalMs);
+    }
+    const nextAutoDisabledKey = next.autoDisabledTypes.join(" ");
+    if (nextAutoDisabledKey !== prevAutoDisabledKey) {
+      prevAutoDisabledKey = nextAutoDisabledKey;
+      autoMode.setDisabledTypes(next.autoDisabledTypes);
     }
     if (next.mode !== prevMode) {
       prevMode = next.mode;
@@ -247,7 +256,11 @@ async function bootstrap(): Promise<void> {
 
   // オプション画面（右下ボタン→設定パネル）。パネルは settings の公開 API を呼ぶ。
   // 開いている間は現行モードを一時停止（Manual は追従を止め、Auto は spawn を止める）。
-  const optionsPanel = new OptionsPanel({ settings, audio });
+  // 「出現する種類」トグル対象（組み込み4種）の id と表示名。カスタム画像クリッターは対象外。
+  const autoTypeOptions = [MOUSE_TYPE_ID, FOXTAIL_TYPE_ID, TOYS_TYPE_ID, INSECT_TYPE_ID].map(
+    (id) => ({ id, name: getCritterType(id).displayName }),
+  );
+  const optionsPanel = new OptionsPanel({ settings, audio, autoTypes: autoTypeOptions });
   const optionsButton = new OptionsButton({ onClick: () => optionsPanel.toggle() });
   optionsPanel.setOnOpenChange((open) => {
     panelOpen = open;

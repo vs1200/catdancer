@@ -189,6 +189,15 @@ const CSS = `
   font-variant-numeric: tabular-nums;
 }
 
+/* 「出現する種類」チェックボックス（種別 ON/OFF）。 */
+.cd-options-checkbox {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #7cc4ff;
+}
+
 .cd-options-file-button,
 .cd-options-secondary {
   display: inline-flex;

@@ -9,6 +9,7 @@ import {
   DEFAULT_MODE,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
+  normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeMode,
   normalizeSettings,
@@ -78,6 +79,38 @@ describe("normalizeMode", () => {
   });
 });
 
+describe("normalizeAutoDisabledTypes", () => {
+  it("文字列要素のみ採用し順序を保つ", () => {
+    expect(normalizeAutoDisabledTypes(["mouse", "insect"])).toEqual(["mouse", "insect"]);
+  });
+
+  it("重複を除去する", () => {
+    expect(normalizeAutoDisabledTypes(["mouse", "mouse", "toys", "mouse"])).toEqual([
+      "mouse",
+      "toys",
+    ]);
+  });
+
+  it("非文字列要素は除去する", () => {
+    expect(normalizeAutoDisabledTypes(["mouse", 1, null, undefined, {}, "toys", true])).toEqual([
+      "mouse",
+      "toys",
+    ]);
+  });
+
+  it("非配列/欠損は [] を返す", () => {
+    expect(normalizeAutoDisabledTypes(undefined)).toEqual([]);
+    expect(normalizeAutoDisabledTypes(null)).toEqual([]);
+    expect(normalizeAutoDisabledTypes("mouse")).toEqual([]);
+    expect(normalizeAutoDisabledTypes(42)).toEqual([]);
+    expect(normalizeAutoDisabledTypes({ 0: "mouse" })).toEqual([]);
+  });
+
+  it("空配列は [] のまま", () => {
+    expect(normalizeAutoDisabledTypes([])).toEqual([]);
+  });
+});
+
 describe("clampSpawnInterval", () => {
   it("範囲内はそのまま", () => {
     expect(clampSpawnInterval(1500)).toBe(1500);
@@ -105,7 +138,7 @@ describe("clampSpawnInterval", () => {
 });
 
 describe("createDefaultSettings", () => {
-  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500", () => {
+  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 無効種別なし", () => {
     const s = createDefaultSettings();
     expect(s).toEqual({
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
@@ -113,6 +146,7 @@ describe("createDefaultSettings", () => {
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       customCritterImageId: null,
+      autoDisabledTypes: [],
     });
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
     expect(DEFAULT_MASTER_VOLUME).toBe(0.5);
@@ -125,8 +159,11 @@ describe("createDefaultSettings", () => {
     const b = createDefaultSettings();
     expect(a).not.toBe(b);
     expect(a.background).not.toBe(b.background);
+    expect(a.autoDisabledTypes).not.toBe(b.autoDisabledTypes);
     a.background.color = "#000000";
+    a.autoDisabledTypes.push("mouse");
     expect(b.background.color).toBe(DEFAULT_BACKGROUND_COLOR);
+    expect(b.autoDisabledTypes).toEqual([]);
   });
 });
 
@@ -139,6 +176,7 @@ describe("normalizeSettings", () => {
         mode: "auto",
         autoSpawnIntervalMs: 900,
         customCritterImageId: "critter-1",
+        autoDisabledTypes: ["insect", "toys"],
       }),
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
@@ -146,6 +184,7 @@ describe("normalizeSettings", () => {
       mode: "auto",
       autoSpawnIntervalMs: 900,
       customCritterImageId: "critter-1",
+      autoDisabledTypes: ["insect", "toys"],
     });
   });
 
@@ -192,6 +231,37 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ customCritterImageId: {} }).customCritterImageId).toBeNull();
   });
 
+  it("autoDisabledTypes は配列の文字列のみ・重複除去、非配列/欠損は []", () => {
+    // 欠損はデフォルト []。
+    expect(normalizeSettings({}).autoDisabledTypes).toEqual([]);
+    // 文字列のみ採用・重複除去。
+    expect(
+      normalizeSettings({ autoDisabledTypes: ["mouse", "mouse", 3, null, "insect"] })
+        .autoDisabledTypes,
+    ).toEqual(["mouse", "insect"]);
+    // 非配列は []。
+    expect(normalizeSettings({ autoDisabledTypes: "mouse" }).autoDisabledTypes).toEqual([]);
+    expect(normalizeSettings({ autoDisabledTypes: 7 }).autoDisabledTypes).toEqual([]);
+    expect(normalizeSettings({ autoDisabledTypes: null }).autoDisabledTypes).toEqual([]);
+  });
+
+  it("既存キー(background/mode/volume/interval/customCritterImageId)を壊さない", () => {
+    const s = normalizeSettings({
+      background: { type: "image", color: "#abc", imageId: "bg-9" },
+      masterVolume: 0.7,
+      mode: "auto",
+      autoSpawnIntervalMs: 1200,
+      customCritterImageId: "critter-9",
+      autoDisabledTypes: ["toys"],
+    });
+    expect(s.background).toEqual({ type: "image", color: "#aabbcc", imageId: "bg-9" });
+    expect(s.masterVolume).toBe(0.7);
+    expect(s.mode).toBe("auto");
+    expect(s.autoSpawnIntervalMs).toBe(1200);
+    expect(s.customCritterImageId).toBe("critter-9");
+    expect(s.autoDisabledTypes).toEqual(["toys"]);
+  });
+
   it("不正な色/音量はフォールバック/クランプ", () => {
     const s = normalizeSettings({
       background: { color: "not-a-color" },
@@ -210,6 +280,7 @@ describe("serializeSettings / parseSettings", () => {
       mode: "auto" as const,
       autoSpawnIntervalMs: 2400,
       customCritterImageId: "critter-xyz",
+      autoDisabledTypes: ["foxtail", "insect"],
     };
     const restored = parseSettings(serializeSettings(original));
     expect(restored).toEqual(original);
@@ -219,6 +290,7 @@ describe("serializeSettings / parseSettings", () => {
     const json = serializeSettings(createDefaultSettings());
     const parsed = JSON.parse(json) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual([
+      "autoDisabledTypes",
       "autoSpawnIntervalMs",
       "background",
       "customCritterImageId",
@@ -245,6 +317,7 @@ describe("serializeSettings / parseSettings", () => {
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       customCritterImageId: null,
+      autoDisabledTypes: [],
     });
   });
 });

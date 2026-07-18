@@ -69,6 +69,10 @@ export class AutoMode implements Mode {
   private readonly maxActive: number;
   /** entries に対応する重み配列（毎フレーム再生成しないよう保持）。 */
   private readonly weights: number[];
+  /** spawn 対象から除外する種別 id の集合（オプションの「出現する種類」ON/OFF）。 */
+  private disabledTypes: Set<string> = new Set();
+  /** spawnOne での有効種別マスク済み重みの再利用バッファ（毎回 new しない）。 */
+  private readonly spawnWeightsBuf: number[] = [];
   private running = false;
   private paused = false;
   /** 毎フレーム再生成しないよう束縛した despawn 述語。 */
@@ -145,6 +149,14 @@ export class AutoMode implements Mode {
   }
 
   /**
+   * 出現を無効化する種別 id の集合を設定する（実行中でも即反映）。
+   * 無効種別は spawnOne の重み付き乱択から除外される（SE/despawn ロジックは不変）。
+   */
+  setDisabledTypes(ids: readonly string[]): void {
+    this.disabledTypes = new Set(ids);
+  }
+
+  /**
    * 出現対象の種別エントリを動的に追加する（実行中でも即反映）。
    * 同一 typeId が既にあれば置換する（bodyTexture/weight を差し替え、重複出現を防ぐ）。
    * entries と weights は常に同じ index 対応を保つ（weightedIndex が破綻しないため）。
@@ -209,13 +221,23 @@ export class AutoMode implements Mode {
     }
   }
 
-  /** 重み付き乱数で 1 種別を選び spawn する。 */
+  /**
+   * 重み付き乱数で 1 種別を選び spawn する。
+   * 無効化された種別は重み 0 でマスクして対象外にする（index 対応は entries と一致させる）。
+   * 全種別が無効なら合計重み 0 で weightedIndex が -1 を返し、no-op になる。
+   */
   private spawnOne(): void {
-    const idx = weightedIndex(this.weights, this.rng());
+    const entries = this.deps.entries;
+    const buf = this.spawnWeightsBuf;
+    buf.length = entries.length;
+    for (let i = 0; i < entries.length; i++) {
+      buf[i] = this.disabledTypes.has(entries[i].typeId) ? 0 : this.weights[i];
+    }
+    const idx = weightedIndex(buf, this.rng());
     if (idx < 0) {
       return;
     }
-    this.spawnEntry(this.deps.entries[idx]);
+    this.spawnEntry(entries[idx]);
   }
 
   /**

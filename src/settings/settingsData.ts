@@ -35,6 +35,12 @@ export interface AppSettings {
    * 未設定は null。画像バイナリは容量的に IndexedDB へ。ここには id のみを持つ。
    */
   customCritterImageId: string | null;
+  /**
+   * auto モードで出現を無効化する組み込み種別 id の配列（既定 []＝全種別有効）。
+   * 「無効化リスト」方式にする理由: 新種別はデフォルトで有効(前方互換)＝好ましい。
+   * カスタム画像クリッターは画像の設定/削除が実質のON/OFFなのでこのリストの対象外。
+   */
+  autoDisabledTypes: string[];
 }
 
 /** 既定の背景色（単色 白）。 */
@@ -90,6 +96,23 @@ export function normalizeMode(value: unknown): AppMode {
 }
 
 /**
+ * auto 無効化種別リストを正規化する。配列の文字列要素のみ採用し、重複を除去する。
+ * 非配列/欠損は [] を返す（全種別有効）。
+ */
+export function normalizeAutoDisabledTypes(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && !out.includes(item)) {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/**
  * 出現間隔(ms)を [MIN,MAX] にクランプする。数値化できない/非有限は既定へフォールバック。
  */
 export function clampSpawnInterval(value: unknown): number {
@@ -116,6 +139,7 @@ export function createDefaultSettings(): AppSettings {
     mode: DEFAULT_MODE,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
     customCritterImageId: null,
+    autoDisabledTypes: [],
   };
 }
 
@@ -130,6 +154,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   mode: DEFAULT_MODE,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   customCritterImageId: null,
+  autoDisabledTypes: Object.freeze([] as string[]) as string[],
 }) as AppSettings;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -159,6 +184,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     mode: normalizeMode(obj.mode),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
     customCritterImageId,
+    autoDisabledTypes: normalizeAutoDisabledTypes(obj.autoDisabledTypes),
   };
 }
 
@@ -174,6 +200,7 @@ export function serializeSettings(settings: AppSettings): string {
     mode: settings.mode,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
     customCritterImageId: settings.customCritterImageId,
+    autoDisabledTypes: [...settings.autoDisabledTypes],
   };
   return JSON.stringify(plain);
 }

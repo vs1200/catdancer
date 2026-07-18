@@ -51,6 +51,7 @@ export class SettingsStore {
       mode: this.state.mode,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
       customCritterImageId: this.state.customCritterImageId,
+      autoDisabledTypes: [...this.state.autoDisabledTypes],
     };
   }
 
@@ -160,6 +161,23 @@ export class SettingsStore {
   /** auto モードの出現間隔(ms)を設定する（範囲外はクランプして永続化＋通知）。 */
   setAutoSpawnInterval(ms: number): void {
     this.state.autoSpawnIntervalMs = clampSpawnInterval(ms);
+    this.commit();
+  }
+
+  /**
+   * auto モードで指定種別の出現を有効/無効にする（永続化＋通知）。
+   * enabled=false なら autoDisabledTypes に追加（重複なし）、true なら除去する。
+   */
+  setAutoTypeEnabled(typeId: string, enabled: boolean): void {
+    const disabled = this.state.autoDisabledTypes;
+    const idx = disabled.indexOf(typeId);
+    if (enabled) {
+      if (idx >= 0) {
+        disabled.splice(idx, 1);
+      }
+    } else if (idx < 0) {
+      disabled.push(typeId);
+    }
     this.commit();
   }
 

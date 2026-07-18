@@ -25,11 +25,22 @@ import { sliderToVolume, volumeToSlider } from "./volumeScale";
 /** カスタム画像クリッターの受理サイズ上限(bytes, ~8MB)。過大画像で IDB/描画を詰まらせない。 */
 const MAX_CRITTER_IMAGE_BYTES = 8 * 1024 * 1024;
 
+/** auto モードでトグルできる種別（id と表示名）。「出現する種類」チェックボックスに使う。 */
+export interface AutoTypeOption {
+  id: string;
+  name: string;
+}
+
 export interface OptionsPanelOptions {
   /** 設定の単一の真実源。全ての変更はこの公開 API を呼ぶ。 */
   settings: SettingsStore;
   /** 音量表示の現在値ソース（現在の masterVolume を反映する）。書き込みは settings 経由。 */
   audio: AudioManager;
+  /**
+   * auto モードでON/OFFできる組み込み種別リスト（mouse/foxtail/toys/insect）。
+   * 未指定/空なら「出現する種類」セクションを表示しない。
+   */
+  autoTypes?: readonly AutoTypeOption[];
   /** 開閉時の通知（開=true）。 */
   onOpenChange?: (open: boolean) => void;
 }
@@ -52,6 +63,8 @@ export class OptionsPanel {
   private readonly critterFileInput: HTMLInputElement;
   private readonly volumeInput: HTMLInputElement;
   private readonly volumeValue: HTMLSpanElement;
+  /** 「出現する種類」チェックボックス（種別 id と input のペア）。 */
+  private readonly autoTypeChecks: Array<{ id: string; input: HTMLInputElement }> = [];
 
   private readonly unsubscribe: () => void;
   private open = false;
@@ -240,6 +253,35 @@ export class OptionsPanel {
 
     critterSection.append(critterImageRow, critterResetRow);
 
+    // --- 出現する種類セクション（auto モードの組み込み種別 ON/OFF） ---
+    // 渡された種別ごとにチェックボックスを並べる。change で settings.setAutoTypeEnabled を呼び、
+    // syncFromSettings で checked を autoDisabledTypes から復元する。種別が無ければ非表示。
+    const autoTypes = options.autoTypes ?? [];
+    const typesSection = document.createElement("section");
+    typesSection.className = "cd-options-section";
+    const typesTitle = document.createElement("h3");
+    typesTitle.className = "cd-options-section-title";
+    typesTitle.textContent = "出現する種類";
+    typesSection.appendChild(typesTitle);
+    for (const type of autoTypes) {
+      const typeRow = document.createElement("div");
+      typeRow.className = "cd-options-row";
+      const typeLabel = document.createElement("label");
+      typeLabel.className = "cd-options-label";
+      typeLabel.textContent = type.name;
+      typeLabel.htmlFor = `cd-auto-type-${type.id}`;
+      const typeCheckbox = document.createElement("input");
+      typeCheckbox.type = "checkbox";
+      typeCheckbox.id = `cd-auto-type-${type.id}`;
+      typeCheckbox.className = "cd-options-checkbox";
+      typeCheckbox.addEventListener("change", () => {
+        this.settings.setAutoTypeEnabled(type.id, typeCheckbox.checked);
+      });
+      typeRow.append(typeLabel, typeCheckbox);
+      typesSection.appendChild(typeRow);
+      this.autoTypeChecks.push({ id: type.id, input: typeCheckbox });
+    }
+
     // --- 音量セクション ---
     const volSection = document.createElement("section");
     volSection.className = "cd-options-section";
@@ -264,7 +306,12 @@ export class OptionsPanel {
     volRow.append(volLabel, volumeInput, volumeValue);
     volSection.append(volTitle, volRow);
 
-    card.append(header, modeSection, bgSection, critterSection, volSection);
+    card.append(header, modeSection, bgSection, critterSection);
+    // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
+    if (this.autoTypeChecks.length > 0) {
+      card.appendChild(typesSection);
+    }
+    card.appendChild(volSection);
     overlay.appendChild(card);
 
     this.element = overlay;
@@ -401,7 +448,18 @@ export class OptionsPanel {
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs);
     this.syncBackground(settings.background);
+    this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
+  }
+
+  /** 「出現する種類」チェックボックスを autoDisabledTypes から復元する（無効リストに無い＝ON）。 */
+  private syncAutoTypes(disabledTypes: readonly string[]): void {
+    for (const { id, input } of this.autoTypeChecks) {
+      const checked = !disabledTypes.includes(id);
+      if (input.checked !== checked) {
+        input.checked = checked;
+      }
+    }
   }
 
   private syncMode(mode: AppMode, intervalMs: number): void {
