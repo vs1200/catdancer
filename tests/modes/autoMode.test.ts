@@ -2,6 +2,7 @@ import type { Texture } from "pixi.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Scene } from "../../src/app/Scene";
 import type { AudioSink } from "../../src/audio/AudioManager";
+import { CATCH_ID } from "../../src/audio/sounds";
 import type { LoopVoice } from "../../src/audio/synth";
 import { createWorldBounds } from "../../src/core/worldBounds";
 import type { CritterSoundSet, CritterType } from "../../src/critters/CritterType";
@@ -43,12 +44,15 @@ function makeFakeAudio() {
   return { sink, createLoop, playOneShot, voices };
 }
 
-/** worldBounds など AutoMode が実際に触れる面だけ持つ最小 fake Scene。 */
-function makeFakeScene(): Scene {
+/**
+ * worldBounds など AutoMode が実際に触れる面だけ持つ最小 fake Scene。
+ * handleTap のテスト用に critterList を差し込めるようにする（既定は空＝従来どおり）。
+ */
+function makeFakeScene(critterList: unknown[] = []): Scene {
   const fake = {
     worldBounds: createWorldBounds({ width: 800, height: 600 }, 200),
     critterCount: 0,
-    critterList: [],
+    critterList,
     despawnAll: vi.fn(),
     despawnWhere: vi.fn(),
     updateAll: vi.fn(),
@@ -203,5 +207,188 @@ describe("AutoMode SE コントローラ Map ライフサイクル", () => {
     // stop() で初めて解放される（controller が保持されていた証左）。
     mode.stop();
     expect(voice.stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * handleTap（捕獲フィードバック）の単体テスト（Pixi 非依存）。
+ *
+ * handleTap が触れるのは各 critter の state.position.{x,y} / state.size / state.typeId と flee のみ
+ * なので、fake critter は `{ state: {...}, flee: vi.fn() }` で足りる（Pixi Sprite 不要）。
+ * typeId は getCritterType で解決されるため beforeEach で登録済みの型を使う（voice 有無の両方）。
+ * mode は entries なしで start() して running にする（spawnOne は weightedIndex(-1) で no-op）。
+ */
+
+/** handleTap が触れる面だけ持つ fake critter（Pixi 不要）。flee は spy。 */
+interface FakeCritter {
+  state: { position: { x: number; y: number }; size: number; typeId: string };
+  flee: ReturnType<typeof vi.fn<(fromX: number, fromY: number) => void>>;
+}
+
+function makeCritter(typeId: string, x: number, y: number, size: number): FakeCritter {
+  return {
+    state: { position: { x, y }, size, typeId },
+    flee: vi.fn<(fromX: number, fromY: number) => void>(),
+  };
+}
+
+/** critterList を注入した running な AutoMode を作る（handleTap テスト用）。 */
+function startedModeWith(audio: AudioSink, critters: FakeCritter[]): AutoMode {
+  const mode = new AutoMode({
+    scene: makeFakeScene(critters),
+    entries: [], // handleTap は entries を使わない。start() は空 entries でも安全（spawnOne が no-op）。
+    audio,
+    intervalMs: 1000,
+    rng: () => 0,
+  });
+  mode.start();
+  return mode;
+}
+
+describe("AutoMode.handleTap 捕獲フィードバック", () => {
+  const VOICE_TYPE = "tap-voice";
+  const VOICE_ID = "tap-squeak";
+  const PLAIN_TYPE = "tap-plain";
+
+  beforeEach(() => {
+    // voice を持つ種別と、voice を持たない種別（→ CATCH_ID フォールバック）の両方を用意する。
+    registerCritterType(makeType(VOICE_TYPE, { voice: VOICE_ID }));
+    registerCritterType(makeType(PLAIN_TYPE, {}));
+  });
+
+  afterEach(() => {
+    clearCritterTypes();
+  });
+
+  it("(1) 当たり半径内の critter をタップ → true を返し、その critter を tap 座標で flee させる", () => {
+    const audio = makeFakeAudio();
+    // size 100 → hitRadius = max(60, 28) = 60。中心(400,300)からタップ(410,300)は距離10でヒット。
+    const c = makeCritter(VOICE_TYPE, 400, 300, 100);
+    const mode = startedModeWith(audio.sink, [c]);
+
+    const hit = mode.handleTap(410, 300);
+
+    expect(hit).toBe(true);
+    expect(c.flee).toHaveBeenCalledTimes(1);
+    expect(c.flee).toHaveBeenCalledWith(410, 300);
+    mode.stop();
+  });
+
+  it("(2) 空きスペースのタップ → false、flee も playOneShot も呼ばれない（誤 despawn しない）", () => {
+    const audio = makeFakeAudio();
+    const c = makeCritter(VOICE_TYPE, 400, 300, 100); // 半径 60。
+    const mode = startedModeWith(audio.sink, [c]);
+
+    const hit = mode.handleTap(400, 400); // 距離 100 > 60 でミス。
+
+    expect(hit).toBe(false);
+    expect(c.flee).not.toHaveBeenCalled();
+    expect(audio.playOneShot).not.toHaveBeenCalled();
+    mode.stop();
+  });
+
+  it("(3) 複数が当たり半径内なら最も近い 1 体だけ flee する", () => {
+    const audio = makeFakeAudio();
+    const near = makeCritter(VOICE_TYPE, 400, 300, 100); // 半径 60。
+    const far = makeCritter(VOICE_TYPE, 420, 300, 100); // 半径 60。
+    const mode = startedModeWith(audio.sink, [near, far]);
+
+    // タップ(405,300): near まで距離 5、far まで距離 15。どちらも半径 60 内 → 近い near のみ。
+    const hit = mode.handleTap(405, 300);
+
+    expect(hit).toBe(true);
+    expect(near.flee).toHaveBeenCalledTimes(1);
+    expect(near.flee).toHaveBeenCalledWith(405, 300);
+    expect(far.flee).not.toHaveBeenCalled();
+    mode.stop();
+  });
+
+  it("(4a) 小さい critter は下限半径 28px: 距離 27 ヒット / 距離 29 ミス", () => {
+    // size 10 → hitRadius = max(6, 28) = 28（下限が効く）。
+    const audioHit = makeFakeAudio();
+    const cHit = makeCritter(VOICE_TYPE, 400, 300, 10);
+    const modeHit = startedModeWith(audioHit.sink, [cHit]);
+    expect(modeHit.handleTap(427, 300)).toBe(true); // 距離 27 ≤ 28。
+    expect(cHit.flee).toHaveBeenCalledTimes(1);
+    modeHit.stop();
+
+    const audioMiss = makeFakeAudio();
+    const cMiss = makeCritter(VOICE_TYPE, 400, 300, 10);
+    const modeMiss = startedModeWith(audioMiss.sink, [cMiss]);
+    expect(modeMiss.handleTap(429, 300)).toBe(false); // 距離 29 > 28。
+    expect(cMiss.flee).not.toHaveBeenCalled();
+    modeMiss.stop();
+  });
+
+  it("(4b) 大きい critter は size ベース半径 60px: 距離 50 ヒット / 距離 70 ミス", () => {
+    // size 100 → hitRadius = max(60, 28) = 60（size ベースが効く）。
+    const audioHit = makeFakeAudio();
+    const cHit = makeCritter(VOICE_TYPE, 400, 300, 100);
+    const modeHit = startedModeWith(audioHit.sink, [cHit]);
+    expect(modeHit.handleTap(450, 300)).toBe(true); // 距離 50 ≤ 60。
+    expect(cHit.flee).toHaveBeenCalledTimes(1);
+    modeHit.stop();
+
+    const audioMiss = makeFakeAudio();
+    const cMiss = makeCritter(VOICE_TYPE, 400, 300, 100);
+    const modeMiss = startedModeWith(audioMiss.sink, [cMiss]);
+    expect(modeMiss.handleTap(470, 300)).toBe(false); // 距離 70 > 60。
+    expect(cMiss.flee).not.toHaveBeenCalled();
+    modeMiss.stop();
+  });
+
+  it("(5) voice を持つ種別は playOneShot(voice)、持たない種別は playOneShot(CATCH_ID)", () => {
+    const audioVoice = makeFakeAudio();
+    const cVoice = makeCritter(VOICE_TYPE, 400, 300, 100);
+    const modeVoice = startedModeWith(audioVoice.sink, [cVoice]);
+    expect(modeVoice.handleTap(400, 300)).toBe(true);
+    expect(audioVoice.playOneShot).toHaveBeenCalledTimes(1);
+    expect(audioVoice.playOneShot).toHaveBeenCalledWith(VOICE_ID);
+    modeVoice.stop();
+
+    const audioPlain = makeFakeAudio();
+    const cPlain = makeCritter(PLAIN_TYPE, 400, 300, 100);
+    const modePlain = startedModeWith(audioPlain.sink, [cPlain]);
+    expect(modePlain.handleTap(400, 300)).toBe(true);
+    expect(audioPlain.playOneShot).toHaveBeenCalledTimes(1);
+    expect(audioPlain.playOneShot).toHaveBeenCalledWith(CATCH_ID);
+    modePlain.stop();
+  });
+
+  it("(6a) not running（start 前）は false かつ副作用なし", () => {
+    const audio = makeFakeAudio();
+    const c = makeCritter(VOICE_TYPE, 400, 300, 100);
+    // start() を呼ばずに構築（running=false）。
+    const mode = new AutoMode({
+      scene: makeFakeScene([c]),
+      entries: [],
+      audio: audio.sink,
+      intervalMs: 1000,
+      rng: () => 0,
+    });
+    expect(mode.handleTap(400, 300)).toBe(false);
+    expect(c.flee).not.toHaveBeenCalled();
+    expect(audio.playOneShot).not.toHaveBeenCalled();
+  });
+
+  it("(6b) stop 後は false かつ副作用なし", () => {
+    const audio = makeFakeAudio();
+    const c = makeCritter(VOICE_TYPE, 400, 300, 100);
+    const mode = startedModeWith(audio.sink, [c]);
+    mode.stop();
+    expect(mode.handleTap(400, 300)).toBe(false);
+    expect(c.flee).not.toHaveBeenCalled();
+    expect(audio.playOneShot).not.toHaveBeenCalled();
+  });
+
+  it("(6c) paused 中は false かつ副作用なし", () => {
+    const audio = makeFakeAudio();
+    const c = makeCritter(VOICE_TYPE, 400, 300, 100);
+    const mode = startedModeWith(audio.sink, [c]);
+    mode.setPaused(true);
+    expect(mode.handleTap(400, 300)).toBe(false);
+    expect(c.flee).not.toHaveBeenCalled();
+    expect(audio.playOneShot).not.toHaveBeenCalled();
+    mode.stop();
   });
 });

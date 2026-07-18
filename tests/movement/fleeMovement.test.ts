@@ -105,4 +105,66 @@ describe("FleeMovement", () => {
     expect(Number.isFinite(state.velocity.x)).toBe(true);
     expect(Number.isFinite(state.velocity.y)).toBe(true);
   });
+
+  // dangle 系(foxtail/toys)の捕獲時、sway 傾き(state.rotation)を 0 へ戻して起き上がらせる修正。
+  describe("rotation の 0 への減衰（dangle 系の起き上がり）", () => {
+    it("正の初期回転(0.6rad)から単調に 0 へ近づき、十分な時間後に厳密に 0 になる", () => {
+      const state = stateAt(400, 300);
+      state.rotation = 0.6; // dangle 系の最大 sway 角相当。
+      const m = new FleeMovement({ dirX: 1, dirY: 0, speed: FLEE_DEFAULT_SPEED });
+      // 単調減少（各フレームで直前より小さく、かつ非負を維持）。
+      let prev = state.rotation;
+      for (let i = 0; i < 10; i++) {
+        m.update(state, 1 / 60, ctx);
+        expect(state.rotation).toBeGreaterThanOrEqual(0);
+        expect(state.rotation).toBeLessThan(prev);
+        prev = state.rotation;
+      }
+      // 約 0.2s で概ね起き上がる（残り傾きは十分小さい）。
+      expect(Math.abs(state.rotation)).toBeLessThan(0.05);
+      // 十分な時間後は EPS スナップで厳密に 0。
+      for (let i = 0; i < 300; i++) {
+        m.update(state, 1 / 60, ctx);
+      }
+      expect(state.rotation).toBe(0);
+    });
+
+    it("負の初期回転(-0.5rad)でも 0 へ収束する（符号非依存）", () => {
+      const state = stateAt(400, 300);
+      state.rotation = -0.5;
+      const m = new FleeMovement({ dirX: 1, dirY: 0, speed: FLEE_DEFAULT_SPEED });
+      let prev = state.rotation;
+      for (let i = 0; i < 10; i++) {
+        m.update(state, 1 / 60, ctx);
+        // 0 へ向かって増加（負→0）し、0 を超えて正へ跳ねない。
+        expect(state.rotation).toBeLessThanOrEqual(0);
+        expect(state.rotation).toBeGreaterThan(prev);
+        prev = state.rotation;
+      }
+      for (let i = 0; i < 300; i++) {
+        m.update(state, 1 / 60, ctx);
+      }
+      expect(state.rotation).toBe(0);
+    });
+
+    it("rotation=0 の critter は update しても 0 のまま（rotate/flip 系の no-op 担保）", () => {
+      const state = stateAt(400, 300);
+      expect(state.rotation).toBe(0); // 既定 0。
+      const m = new FleeMovement({ dirX: 1, dirY: 0, speed: FLEE_DEFAULT_SPEED });
+      for (let i = 0; i < 30; i++) {
+        m.update(state, 1 / 60, ctx);
+        expect(state.rotation).toBe(0);
+      }
+    });
+
+    it("dt<=0 では rotation を触らない（NaN・暴走ガードと一貫）", () => {
+      const state = stateAt(400, 300);
+      state.rotation = 0.4;
+      const m = new FleeMovement({ dirX: 1, dirY: 0, speed: FLEE_DEFAULT_SPEED });
+      m.update(state, 0, ctx);
+      expect(state.rotation).toBe(0.4);
+      m.update(state, -1, ctx);
+      expect(state.rotation).toBe(0.4);
+    });
+  });
 });
