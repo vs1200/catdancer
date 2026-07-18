@@ -13,6 +13,12 @@ import type { CritterType } from "./CritterType";
 export function critterHideRadius(type: CritterType): number {
   // 本体は最大辺=baseSize、中心アンカーなので半径は baseSize/2。
   const bodyRadius = type.baseSize / 2;
+  // 回転 sway 系（dangle）: pivot(端寄り)を支点に振れるため、本体は最大辺の箱を回した範囲へ
+  // 広がる。pivot の中心オフセット(<=半対角) + pivot→最遠コーナー(<=対角) を安全側に概算する
+  // （アスペクト未知＝baseSize は最大辺のみのため係数で見積もる。実測はスクショで確認）。
+  if (type.sway) {
+    return Math.max(bodyRadius, 1.5 * type.baseSize);
+  }
   const tail = type.hasTail ? type.tail : undefined;
   if (!tail) {
     return bodyRadius;

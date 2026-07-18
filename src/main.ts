@@ -7,7 +7,9 @@ import { AudioManager } from "./audio/AudioManager";
 import { MOUSE_SQUEAK_ID, registerCritterSounds } from "./audio/sounds";
 import { getCritterType, listCritterTypes } from "./critters/registry";
 import { createTailTexture } from "./critters/tail/tailTexture";
+import { FOXTAIL_TYPE_ID, registerFoxtailType } from "./critters/types/foxtail";
 import { MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
+import { registerToysType, TOYS_TYPE_ID } from "./critters/types/toys";
 import { computeWorldMargin } from "./critters/worldMargin";
 import { AutoMode } from "./modes/AutoMode";
 import { ManualMode } from "./modes/ManualMode";
@@ -24,7 +26,8 @@ import { OptionsPanel } from "./ui/OptionsPanel";
  * 設定の mode に応じて start/stop を切り替え、毎フレーム現行モードを update する。
  *
  * ManualMode: ポインタへ慣性追従するネズミ 1 体（v1 の挙動）。
- * AutoMode: 一定間隔でネズミを画面外から spawn → 横切り → 画面外で despawn（猫用動画）。
+ * AutoMode: 一定間隔で mouse/foxtail/toys を重み付きでミックス spawn（ネズミ=横断、猫じゃらし/
+ *   おもちゃ=揺れて誘い縁へ退場）→ 画面外で despawn（猫用動画）。
  * mode / 出現間隔はオプション画面から変更・永続化し、reload で復元する。
  */
 async function bootstrap(): Promise<void> {
@@ -46,8 +49,11 @@ async function bootstrap(): Promise<void> {
   registerCritterSounds(audio);
   audio.attachAutoResume(window);
 
-  // 種別レジストリへネズミを登録し、その hideRadius から margin を決める（本体＋尻尾を隠せる幅）。
+  // 種別レジストリへ登録（ネズミ＋dangle系: 猫じゃらし/おもちゃ）。
+  // 登録済み全種別の hideRadius から margin を決める（本体＋尻尾/揺れを隠せる幅）。
   registerMouseType();
+  registerFoxtailType();
+  registerToysType();
   const margin = computeWorldMargin(listCritterTypes(), DEFAULT_WORLD_MARGIN);
 
   const scene = new Scene(app.viewport, margin);
@@ -57,11 +63,17 @@ async function bootstrap(): Promise<void> {
   // 背景設定 → 描画の橋渡し。
   const backgroundController = new BackgroundController(scene.backgroundLayer);
 
-  // 共有テクスチャ: 本体はロード、尻尾は 1 度だけ手続き生成する。
-  // 全 critter でこの 2 枚を共有するため、AutoMode の多数 spawn でもテクスチャは増えない
+  // 共有テクスチャ: 各種別の本体をロード、尻尾は 1 度だけ手続き生成する。
+  // 全 critter で共有するため、AutoMode の多数 spawn でもテクスチャは増えない
   // （despawn 時は Sprite/MeshRope の geometry のみ破棄し、共有テクスチャは保持＝リークしない）。
   const mouseType = getCritterType(MOUSE_TYPE_ID);
-  const bodyTexture = await Assets.load(mouseType.textureUrl);
+  const foxtailType = getCritterType(FOXTAIL_TYPE_ID);
+  const toysType = getCritterType(TOYS_TYPE_ID);
+  const [bodyTexture, foxtailTexture, toysTexture] = await Promise.all([
+    Assets.load(mouseType.textureUrl),
+    Assets.load(foxtailType.textureUrl),
+    Assets.load(toysType.textureUrl),
+  ]);
   const tailTexture = createTailTexture();
 
   // ポインタ入力（ManualMode が attach/detach を占有管理する）。
@@ -77,13 +89,17 @@ async function bootstrap(): Promise<void> {
     sounds: mouseType.sounds,
     typeId: MOUSE_TYPE_ID,
   });
+  // AutoMode は登録済みの auto 対象種別を重み付きでミックス出現させる。
+  // mouse=横断、foxtail/toys=揺れて誘い縁へ退場。重みで出現頻度を調整する。
   const autoMode = new AutoMode({
     scene,
-    bodyTexture,
-    tailTexture,
+    entries: [
+      { typeId: MOUSE_TYPE_ID, bodyTexture, tailTexture, weight: 2 },
+      { typeId: FOXTAIL_TYPE_ID, bodyTexture: foxtailTexture, weight: 1.5 },
+      { typeId: TOYS_TYPE_ID, bodyTexture: toysTexture, weight: 1.5 },
+    ],
     audio,
     sounds: mouseType.sounds,
-    typeId: MOUSE_TYPE_ID,
     intervalMs: settings.settings.autoSpawnIntervalMs,
   });
 
@@ -144,6 +160,18 @@ async function bootstrap(): Promise<void> {
     (window as unknown as { __catScene?: unknown }).__catScene = {
       critterCount: () => scene.critterCount,
       mode: () => currentModeName,
+      // モード切替（例: __catScene.setMode('auto')）。settings 経由で switchTo が走る。
+      setMode: (name: AppMode) => settings.setMode(name),
+      // 特定種別を強制 spawn（sway/pivot/出入りの確認用）。auto モードでないと更新されないため
+      // 自動で auto へ切替えてから注入する（例: __catScene.spawnType('foxtail')）。
+      spawnType: (typeId: string) => {
+        if (currentModeName !== "auto") {
+          settings.setMode("auto");
+        }
+        autoMode.spawnType(typeId);
+      },
+      // 画面上の critter を全消去（isolated スクショ用）。
+      clear: () => scene.despawnAll(),
     };
     // 設定 API（オプション画面が呼ぶ形）を検証用に露出する。
     // 例: __catSettings.setMode('auto') / setAutoSpawnInterval(800)

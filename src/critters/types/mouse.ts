@@ -1,4 +1,5 @@
 import { MOUSE_SCURRY_ID, MOUSE_SQUEAK_ID } from "../../audio/sounds";
+import { CrossMovement, planCrossSpawn } from "../../movement/CrossMovement";
 import { MouseFollowMovement } from "../../movement/MouseFollowMovement";
 import type { CritterType } from "../CritterType";
 import { registerCritterType } from "../registry";
@@ -23,6 +24,23 @@ export const mouseType: CritterType = {
   defaultFacing: 1,
   // v1 マウス操作モードの既定。ポインタへ慣性追従＋画面外バッファで出現/消失する。
   createMovement: () => new MouseFollowMovement(),
+  // AutoMode では左右いずれかの端から横断する（CrossMovement）。進行方向で水平反転する。
+  flipWithFacing: true,
+  createAutoSpawn: (world, rng) => {
+    const plan = planCrossSpawn(world, rng);
+    return {
+      position: plan.position,
+      velocity: plan.velocity,
+      facing: plan.facing,
+      movement: new CrossMovement({
+        vx: plan.velocity.x,
+        vy: plan.velocity.y,
+        wobbleAmp: plan.wobbleAmp,
+        wobbleFreq: plan.wobbleFreq,
+        phase: plan.phase,
+      }),
+    };
+  },
   sounds: { voice: MOUSE_SQUEAK_ID, move: MOUSE_SCURRY_ID },
   hasTail: true,
   tail: {

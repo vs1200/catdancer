@@ -2,7 +2,8 @@ import type { Texture } from "pixi.js";
 import { Container, Sprite } from "pixi.js";
 import type { Movement, MovementContext } from "../movement/Movement";
 import type { CritterState, Facing } from "./CritterState";
-import type { TailConfig } from "./CritterType";
+import type { SwayConfig, TailConfig } from "./CritterType";
+import { pivotOffsetPx } from "./pivot";
 import type { CritterSpawnOptions } from "./registry";
 import { createCritterStateFromType, getCritterType } from "./registry";
 import type { RopeTail } from "./tail/RopeTail";
@@ -21,6 +22,10 @@ export interface CritterViewOptions {
    * 共有テクスチャを渡してテクスチャの都度生成/リークを避ける。
    */
   tailTexture?: Texture;
+  /** 回転 sway 設定。あれば pivot 周りに state.rotation を反映する（dangle 系）。 */
+  sway?: SwayConfig;
+  /** 進行方向で水平反転するか（省略/true=反転。dangle 系は false）。 */
+  flipWithFacing?: boolean;
 }
 
 /**
@@ -40,8 +45,12 @@ export class Critter {
   private readonly baseScale: number;
   /** 素材の既定向き（反転式で使用）。 */
   private readonly defaultFacing: Facing;
+  /** 進行方向で水平反転するか（dangle 系は false）。 */
+  private readonly flipWithFacing: boolean;
   /** 尻尾（無ければ null）。 */
   private readonly tail: RopeTail | null;
+  /** 回転 sway 用の内側 Container（pivot を支点に回す。無ければ null）。 */
+  private readonly swayContainer: Container | null;
   /** 起動からの経過秒（尻尾アニメの位相に使用）。 */
   private elapsedSeconds = 0;
 
@@ -54,6 +63,7 @@ export class Critter {
     this.state = state;
     this.movement = movement;
     this.defaultFacing = options?.defaultFacing ?? 1;
+    this.flipWithFacing = options?.flipWithFacing ?? true;
 
     this.view = new Container();
     this.sprite = new Sprite(texture);
@@ -62,18 +72,32 @@ export class Critter {
     const maxSide = Math.max(texture.width, texture.height) || 1;
     this.baseScale = state.size / maxSide;
     this.sprite.scale.set(this.baseScale);
+    const displayWidth = texture.width * this.baseScale;
+    const displayHeight = texture.height * this.baseScale;
 
     // 尻尾は本体の後方に垂れるため sprite より背面に置く（addChild 順で奥→手前）。
     if (options?.tail) {
-      const displayWidth = texture.width * this.baseScale;
-      const displayHeight = texture.height * this.baseScale;
       this.tail = createRopeTail(options.tail, displayWidth, displayHeight, options.tailTexture);
       this.view.addChild(this.tail.mesh);
     } else {
       this.tail = null;
     }
 
-    this.view.addChild(this.sprite);
+    // 回転 sway があれば、pivot を支点に回すため sprite を内側 Container で包む。
+    // Container.pivot=position=pivotOffset とすると、その点は親座標で固定され、rotation は
+    // その点周りに掛かる（＝支点を持って振る見え方）。sway 無しなら sprite を直接載せる。
+    if (options?.sway) {
+      const off = pivotOffsetPx(options.sway.pivot, displayWidth, displayHeight);
+      this.swayContainer = new Container();
+      this.swayContainer.pivot.set(off.x, off.y);
+      this.swayContainer.position.set(off.x, off.y);
+      this.swayContainer.addChild(this.sprite);
+      this.view.addChild(this.swayContainer);
+    } else {
+      this.swayContainer = null;
+      this.view.addChild(this.sprite);
+    }
+
     this.syncView();
   }
 
@@ -90,10 +114,18 @@ export class Critter {
     this.syncView();
   }
 
-  /** state → 表示同期。位置反映と facing*defaultFacing による Container 左右反転。 */
+  /**
+   * state → 表示同期。位置反映と、必要なら facing*defaultFacing による Container 左右反転、
+   * sway があれば pivot 周りの回転(state.rotation)を反映する。
+   */
   private syncView(): void {
     this.view.position.set(this.state.position.x, this.state.position.y);
-    this.view.scale.x = this.state.facing * this.defaultFacing;
+    this.view.scale.x = this.flipWithFacing
+      ? this.state.facing * this.defaultFacing
+      : this.defaultFacing;
+    if (this.swayContainer) {
+      this.swayContainer.rotation = this.state.rotation;
+    }
   }
 
   /**
@@ -138,5 +170,7 @@ export function spawnCritter(params: SpawnCritterParams): Critter {
     defaultFacing: type.defaultFacing,
     tail: type.hasTail ? type.tail : undefined,
     tailTexture: params.tailTexture,
+    sway: type.sway,
+    flipWithFacing: type.flipWithFacing,
   });
 }

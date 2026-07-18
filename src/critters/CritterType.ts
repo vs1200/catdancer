@@ -1,3 +1,5 @@
+import type { Vec2 } from "../core/vec2";
+import type { WorldBounds } from "../core/worldBounds";
 import type { Movement } from "../movement/Movement";
 import type { Facing } from "./CritterState";
 
@@ -39,6 +41,26 @@ export interface TailConfig {
 }
 
 /**
+ * 回転 sway（振り子揺れ）の設定。dangle 系（猫じゃらし/おもちゃ）が使う。
+ * pivot は本体テクスチャ正規化座標(0..1, 左上原点)＝振り子の支点。表示側(Critter)がこの点を
+ * 軸に state.rotation を掛ける（foxtail=茎の根元＝左下寄り, toys=柄の端＝左寄り）。
+ */
+export interface SwayConfig {
+  readonly pivot: { readonly x: number; readonly y: number };
+}
+
+/**
+ * AutoMode が種別ごとに生成する spawn 計画（純データ）。位置/初速/向きと、割り当てる Movement を
+ * 種別側で決める（mouse=CrossMovement, foxtail/toys=DangleMovement）。PixiJS 非依存。
+ */
+export interface AutoSpawnPlan {
+  position: Vec2;
+  velocity: Vec2;
+  facing: Facing;
+  movement: Movement;
+}
+
+/**
  * 種別定義。新オブジェクトは「この型を1つ定義 + アセット」で追加できる。
  */
 export interface CritterType {
@@ -60,4 +82,19 @@ export interface CritterType {
   readonly hasTail: boolean;
   /** 尻尾設定。hasTail=true のとき参照する。 */
   readonly tail?: TailConfig;
+  /**
+   * 回転 sway 設定。あれば pivot 周りに state.rotation を掛ける（dangle 系）。
+   * 無ければ回転しない（走る/追従系）。
+   */
+  readonly sway?: SwayConfig;
+  /**
+   * 進行方向で水平反転するか。省略/true=反転する（ネズミ）、false=反転しない（dangle 系は
+   * 回転 sway が主なので反転を強制しない）。
+   */
+  readonly flipWithFacing?: boolean;
+  /**
+   * AutoMode 用の spawn 計画を生成する（種別ごとに位置/初速/Movement を決める）。
+   * rng は [0,1) を返す関数（テスト差し替え可能）。未定義の種別は AutoMode の対象にしない。
+   */
+  readonly createAutoSpawn?: (world: WorldBounds, rng: () => number) => AutoSpawnPlan;
 }

@@ -17,6 +17,11 @@ export interface CritterState {
   facing: Facing;
   /** 表示時の最大辺(px)目安。margin 算出やスケールの基準。 */
   size: number;
+  /**
+   * 回転 sway 角(rad)。pivot 周りの振り子揺れに用いる（dangle 系のみ非0）。
+   * 表示側(Critter)が pivot を支点とした回転へ反映する。既定 0（走る/追従系は使わない）。
+   */
+  rotation: number;
 }
 
 export interface CritterStateInit {
@@ -25,6 +30,8 @@ export interface CritterStateInit {
   velocity?: Vec2;
   facing?: Facing;
   size: number;
+  /** 初期回転角(rad)。省略時 0。 */
+  rotation?: number;
 }
 
 export function createCritterState(init: CritterStateInit): CritterState {
@@ -34,6 +41,7 @@ export function createCritterState(init: CritterStateInit): CritterState {
     velocity: init.velocity ? { x: init.velocity.x, y: init.velocity.y } : { x: 0, y: 0 },
     facing: init.facing ?? 1,
     size: init.size,
+    rotation: init.rotation ?? 0,
   };
 }
 

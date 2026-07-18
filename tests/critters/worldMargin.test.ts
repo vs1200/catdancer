@@ -30,6 +30,14 @@ describe("critterHideRadius", () => {
     expect(r).toBeGreaterThan(320);
     expect(r).toBeLessThan(335);
   });
+
+  it("sway系(回転揺れ)は本体半径より大きい（回した範囲を隠せる）", () => {
+    const sway = makeType({ baseSize: 360, hasTail: false, sway: { pivot: { x: 0.14, y: 0.85 } } });
+    const r = critterHideRadius(sway);
+    // 1.5*baseSize=540（端寄り pivot 周りの回転を安全側に覆う）。
+    expect(r).toBe(540);
+    expect(r).toBeGreaterThan(sway.baseSize / 2);
+  });
 });
 
 describe("computeWorldMargin", () => {
