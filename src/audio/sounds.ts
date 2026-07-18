@@ -1,6 +1,6 @@
 import type { AudioManager } from "./AudioManager";
 import { makeSqueakParams } from "./audioMath";
-import { createScurryVoice, playSqueak } from "./synth";
+import { createBuzzVoice, createScurryVoice, playSqueak } from "./synth";
 
 /**
  * SE カタログ。CritterType.sounds が参照する SE id と、その合成ビルダを AudioManager へ登録する。
@@ -11,6 +11,8 @@ import { createScurryVoice, playSqueak } from "./synth";
 export const MOUSE_SQUEAK_ID = "mouse-squeak";
 /** ネズミの走行音（scurry）ループSE id。 */
 export const MOUSE_SCURRY_ID = "mouse-scurry";
+/** 虫の羽音（buzz）ループSE id。 */
+export const INSECT_BUZZ_ID = "insect-buzz";
 
 /** 合成SEを AudioManager のバンクへ登録する。main の起動時に一度呼ぶ。 */
 export function registerCritterSounds(audio: AudioManager): void {
@@ -19,4 +21,5 @@ export function registerCritterSounds(audio: AudioManager): void {
     playSqueak(engine, makeSqueakParams());
   });
   audio.registerLoop(MOUSE_SCURRY_ID, (engine) => createScurryVoice(engine));
+  audio.registerLoop(INSECT_BUZZ_ID, (engine) => createBuzzVoice(engine));
 }

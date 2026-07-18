@@ -1,3 +1,4 @@
+import type { ScurryLevelOptions } from "../audio/audioMath";
 import type { Vec2 } from "../core/vec2";
 import type { WorldBounds } from "../core/worldBounds";
 import type { Movement } from "../movement/Movement";
@@ -82,8 +83,13 @@ export interface CritterType {
   readonly defaultFacing: Facing;
   /** この種別の既定 Movement を生成する。critter ごとに独立インスタンスを持てるよう関数で渡す。 */
   readonly createMovement: () => Movement;
-  /** SE セット（プレースホルダ）。 */
+  /** SE セット（voice=断続ワンショット / move=速度連動ループ）。 */
   readonly sounds: CritterSoundSet;
+  /**
+   * move ループSE(走行音/羽音)の速度→レベル写像。省略時は SCURRY_LEVEL_DEFAULTS。
+   * 種別ごとにピーク速度が違うため（虫は小さめ maxSpeed で早く飽和 等）ここで調整する。
+   */
+  readonly moveLevel?: ScurryLevelOptions;
   /** 尻尾(MeshRope)など特殊描画が必要か。 */
   readonly hasTail: boolean;
   /** 尻尾設定。hasTail=true のとき参照する。 */

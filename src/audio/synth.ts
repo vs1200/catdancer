@@ -147,3 +147,95 @@ export function createScurryVoice(engine: AudioEngine): LoopVoice {
     },
   };
 }
+
+/** 羽音レベル(0..1)に掛ける実 gain の最大値（sawtooth は成分が濃いので scurry より控えめ）。 */
+const BUZZ_MAX_GAIN = 0.3;
+/** レベル追従の時定数(秒)。虫の停止(pause)を挟んでも羽音が途切れすぎないよう scurry より長め。 */
+const BUZZ_SMOOTH_TAU = 0.08;
+
+/**
+ * 虫の羽音（buzz）ループ声部を生成する。
+ * 羽ばたき周波数(~180Hz)の sawtooth を基音に、遅い LFO でピッチをわずかに揺らし（生きている不規則さ）、
+ * 速い LFO でアンプ・トレモロ（羽ばたきのフラッタ）を掛け、bandpass で虫らしい帯域へ整形する。
+ * setLevel で移動速度に連動して gain を上下させ、stop で全ノードを切断する（scurry と同じくリーク防止）。
+ */
+export function createBuzzVoice(engine: AudioEngine): LoopVoice {
+  const { context, output } = engine;
+
+  // 基音: 羽ばたき ~180Hz の sawtooth（倍音が濃く「ブーン」というブザー感を作る）。
+  const osc = context.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.value = 180;
+
+  // ピッチ揺らぎ（遅い LFO で ±約 14Hz）。飛翔の不規則さを出す。
+  const pitchLfo = context.createOscillator();
+  pitchLfo.type = "sine";
+  pitchLfo.frequency.value = 6;
+  const pitchDepth = context.createGain();
+  pitchDepth.gain.value = 14;
+  pitchLfo.connect(pitchDepth);
+  pitchDepth.connect(osc.frequency);
+
+  // 虫らしい帯域へ整形（低め中心のバンドパスで金属的な高域を抑える）。
+  const bandpass = context.createBiquadFilter();
+  bandpass.type = "bandpass";
+  bandpass.frequency.value = 520;
+  bandpass.Q.value = 0.8;
+
+  // アンプ・トレモロ（速い LFO で羽ばたきのフラッタ）。base 0.75 を ±0.22 揺らす。
+  const trem = context.createGain();
+  trem.gain.value = 0.75;
+  const ampLfo = context.createOscillator();
+  ampLfo.type = "sine";
+  ampLfo.frequency.value = 24;
+  const ampDepth = context.createGain();
+  ampDepth.gain.value = 0.22;
+  ampLfo.connect(ampDepth);
+  ampDepth.connect(trem.gain);
+
+  // 速度連動 gain（初期は無音）。
+  const level = context.createGain();
+  level.gain.value = 0;
+
+  osc.connect(bandpass);
+  bandpass.connect(trem);
+  trem.connect(level);
+  level.connect(output);
+
+  osc.start();
+  pitchLfo.start();
+  ampLfo.start();
+
+  let stopped = false;
+  return {
+    setLevel(value: number): void {
+      if (stopped) {
+        return;
+      }
+      const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
+      const target = clamped * BUZZ_MAX_GAIN;
+      level.gain.setTargetAtTime(target, context.currentTime, BUZZ_SMOOTH_TAU);
+    },
+    stop(): void {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      try {
+        osc.stop();
+        pitchLfo.stop();
+        ampLfo.stop();
+      } catch {
+        // 既に停止済みでも問題なし。
+      }
+      osc.disconnect();
+      pitchLfo.disconnect();
+      pitchDepth.disconnect();
+      bandpass.disconnect();
+      trem.disconnect();
+      ampLfo.disconnect();
+      ampDepth.disconnect();
+      level.disconnect();
+    },
+  };
+}

@@ -19,10 +19,29 @@ export interface ScurryLevelOptions {
   maxSpeed: number;
 }
 
-/** 既定の速度写像。ゆっくりでも少し鳴り、全力疾走で飽和する値。 */
+/** 既定の速度写像。ゆっくりでも少し鳴り、全力疾走で飽和する値（AutoMode の横断ネズミ向け）。 */
 export const SCURRY_LEVEL_DEFAULTS = {
   minSpeed: 15,
   maxSpeed: 480,
+} as const satisfies ScurryLevelOptions;
+
+/**
+ * ポインタ追従ネズミ（ManualMode）の走行音写像。
+ * MouseFollowMovement はピーク速度が大きい(~3600)ため、既定 maxSpeed=480 では即飽和して抑揚が
+ * 出ない。maxSpeed を上方調整して「速いほど活発」の抑揚が残るようにする。
+ */
+export const SCURRY_LEVEL_MOUSE_FOLLOW = {
+  minSpeed: 15,
+  maxSpeed: 1500,
+} as const satisfies ScurryLevelOptions;
+
+/**
+ * 虫の羽音(buzz)の速度写像。虫のダッシュは速度が非常にスパイキー（ダッシュで高速→停止で ~0）なので、
+ * 小さめ maxSpeed で「飛んでいれば概ね鳴る」よう早く飽和させ、minSpeed も低くして微動でも途切れにくくする。
+ */
+export const BUZZ_LEVEL_DEFAULTS = {
+  minSpeed: 6,
+  maxSpeed: 140,
 } as const satisfies ScurryLevelOptions;
 
 /**

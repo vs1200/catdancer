@@ -1,3 +1,5 @@
+import { BUZZ_LEVEL_DEFAULTS } from "../../audio/audioMath";
+import { INSECT_BUZZ_ID } from "../../audio/sounds";
 import {
   ERRATIC_SPAWN_DEFAULTS,
   ErraticMovement,
@@ -42,7 +44,7 @@ function inPlaceErraticPlan(): ErraticPlan {
 /**
  * 虫種別。元画像は右向き(defaultFacing=1)＝頭が +x。faceMode='rotate' でダッシュ方向へ回頭する。
  * 尻尾なし・sway なし。素早い不規則ダッシュ(ErraticMovement)で猫の狩猟本能を刺激する。
- * SE は当面 AutoMode 共有SEを流用（オブジェクト別SEは別タスク）。
+ * SE は羽音(buzz)のみ（鳴き声 voice なし）＝飛翔速度に連動して「ブーン」と鳴る。
  */
 export const insectType: CritterType = {
   id: INSECT_TYPE_ID,
@@ -65,7 +67,9 @@ export const insectType: CritterType = {
       movement: new ErraticMovement(plan),
     };
   },
-  sounds: {},
+  // 羽音のみ（voice=鳴き声なし, move=速度連動の羽音ループ）。虫向けの速度写像で早く飽和させる。
+  sounds: { move: INSECT_BUZZ_ID },
+  moveLevel: BUZZ_LEVEL_DEFAULTS,
   hasTail: false,
 };
 
