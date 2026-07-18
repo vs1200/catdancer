@@ -69,6 +69,17 @@ export class CritterAudioController {
     return this.currentLevel;
   }
 
+  /**
+   * ループSE(走行音/羽音)を即座に無音化する（pause 時のミュート）。
+   * pause 中は update が呼ばれず gain が最後の値で凍結したまま鳴り続けるため、明示的に 0 へ落とす。
+   * voice ワンショットは update でしか鳴らないので追加操作は不要。冪等（多重呼び出し安全）。
+   * unpause 後は次フレームの update が通常の速度連動に戻すので、復帰処理は不要。
+   */
+  silence(): void {
+    this.currentLevel = 0;
+    this.moveVoice?.setLevel(0);
+  }
+
   /** ループSEを停止して解放する。 */
   stop(): void {
     this.moveVoice?.stop();

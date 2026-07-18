@@ -141,6 +141,13 @@ export class AutoMode implements Mode {
 
   setPaused(paused: boolean): void {
     this.paused = paused;
+    if (paused) {
+      // pause 中は update が早期 return するため、ループSE(羽音/走行音)が最後の gain のまま
+      // 鳴り続けてしまう。全 controller を即無音化する（unpause 時は次フレームの update が復帰）。
+      for (const ctrl of this.audioCtrls.values()) {
+        ctrl.silence();
+      }
+    }
   }
 
   /** 出現間隔(ms)を変更する（実行中でも即反映）。 */

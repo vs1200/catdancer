@@ -89,6 +89,8 @@ export class ManualMode implements Mode {
       return;
     }
     if (paused) {
+      // ループSE(走行音)を即無音化する（パネルを開くと最後の音量のまま鳴り続けるのを防ぐ）。
+      this.audioCtrl.silence();
       this.deps.pointer.detach();
       this.deps.pointer.centerToViewport();
     } else {

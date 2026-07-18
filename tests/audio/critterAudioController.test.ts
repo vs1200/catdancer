@@ -135,4 +135,40 @@ describe("CritterAudioController", () => {
     expect(ctrl.scurryLevel).toBe(1);
     expect(f.fired).toEqual(["squeak"]);
   });
+
+  it("silence() で走行音レベルを 0 に落とす（pause 時ミュート、voice 非発火・冪等）", () => {
+    const f = makeFakeSink();
+    const ctrl = new CritterAudioController(
+      f.sink,
+      { voice: "squeak", move: "m" },
+      {
+        scurry: { minSpeed: 20, maxSpeed: 120 },
+        squeak: { minInterval: 0.1, maxInterval: 0.1, rng: () => 0 },
+      },
+    );
+    ctrl.start();
+    // present=true で走行音レベルを上げておく（level>0 の状態を作る）。
+    ctrl.update(9999, 1, true);
+    expect(ctrl.scurryLevel).toBe(1);
+    const firedBefore = f.fired.length;
+
+    // silence でレベル 0、LoopVoice へ setLevel(0) が伝わる。voice は鳴らさない。
+    ctrl.silence();
+    expect(ctrl.scurryLevel).toBe(0);
+    expect(f.levels.at(-1)).toBe(0);
+    expect(f.fired.length).toBe(firedBefore);
+
+    // 冪等: 二重 silence でも安全（例外なく 0 のまま）。
+    ctrl.silence();
+    expect(ctrl.scurryLevel).toBe(0);
+  });
+
+  it("start 前の silence() でもクラッシュしない（moveVoice 未生成でも安全）", () => {
+    const f = makeFakeSink();
+    const ctrl = new CritterAudioController(f.sink, { move: "m" });
+    // start していないので moveVoice は null。optional chaining で no-op になる。
+    expect(() => ctrl.silence()).not.toThrow();
+    expect(ctrl.scurryLevel).toBe(0);
+    expect(f.loopsCreated).toBe(0);
+  });
 });
