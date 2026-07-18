@@ -25,6 +25,24 @@ import { sliderToVolume, volumeToSlider } from "./volumeScale";
 /** カスタム画像クリッターの受理サイズ上限(bytes, ~8MB)。過大画像で IDB/描画を詰まらせない。 */
 const MAX_CRITTER_IMAGE_BYTES = 8 * 1024 * 1024;
 
+/**
+ * 受理する画像 MIME の allowlist（背景/クリッター共通）。
+ * intrinsic サイズを欠く SVG（0/既定寸法で崩れる）や、先頭フレームのみ表示される GIF 等を弾き、
+ * 確実にラスタ寸法を持つ png/jpeg/webp のみ通す。file input の accept 属性もこの 3 種に揃える。
+ */
+const ACCEPTED_IMAGE_MIME_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/webp"];
+/** file input の accept 属性値（allowlist と一致させる）。 */
+const ACCEPTED_IMAGE_ACCEPT = ACCEPTED_IMAGE_MIME_TYPES.join(",");
+
+/**
+ * file.type が allowlist 外なら true（＝弾く）。
+ * type 空（ブラウザが判定不能）は既存踏襲で通す（false）。背景/クリッターで扱いを一貫させ、
+ * ロード側のデコード失敗フォールバックに委ねる。SVG/GIF 等は非空の明示 type を持つため弾かれる。
+ */
+function isRejectedImageType(type: string): boolean {
+  return type !== "" && !ACCEPTED_IMAGE_MIME_TYPES.includes(type);
+}
+
 /** auto モードでトグルできる種別（id と表示名）。「出現する種類」チェックボックスに使う。 */
 export interface AutoTypeOption {
   id: string;
@@ -191,7 +209,7 @@ export class OptionsPanel {
     const fileInput = document.createElement("input");
     fileInput.type = "file";
     fileInput.id = "cd-bg-image-input";
-    fileInput.accept = "image/*";
+    fileInput.accept = ACCEPTED_IMAGE_ACCEPT;
     fileInput.className = "cd-visually-hidden";
     fileInput.addEventListener("change", () => this.onFileChange());
     fileButton.appendChild(fileInput);
@@ -233,7 +251,7 @@ export class OptionsPanel {
     const critterFileInput = document.createElement("input");
     critterFileInput.type = "file";
     critterFileInput.id = "cd-critter-image-input";
-    critterFileInput.accept = "image/*";
+    critterFileInput.accept = ACCEPTED_IMAGE_ACCEPT;
     critterFileInput.className = "cd-visually-hidden";
     critterFileInput.addEventListener("change", () => this.onCritterFileChange());
     critterFileButton.appendChild(critterFileInput);
@@ -401,10 +419,10 @@ export class OptionsPanel {
     if (!file) {
       return;
     }
-    // 非画像ファイルの耐性: type が明示的に非画像なら無駄な IDB 書き込みをせず無視する
-    // （type 空は判定不能なので通し、BackgroundController のデコード失敗フォールバックに委ねる）。
-    if (file.type && !file.type.startsWith("image/")) {
-      console.warn("画像ファイルではないため無視します。", file.type);
+    // MIME allowlist（png/jpeg/webp）で受理。SVG/GIF 等は非空 type を持つため弾く。
+    // type 空は判定不能として通し、BackgroundController のデコード失敗フォールバックに委ねる。
+    if (isRejectedImageType(file.type)) {
+      console.warn("対応していない画像形式のため無視します。", file.type);
       return;
     }
     void this.settings.setBackgroundImage(file);
@@ -417,13 +435,13 @@ export class OptionsPanel {
     if (!file) {
       return;
     }
-    // 画像 MIME 検証: type が明示的に非画像なら無駄な IDB 書き込みをせず無視する
-    // （type 空は判定不能なので通し、ロード側のデコード失敗フォールバックに委ねる）。
-    if (file.type && !file.type.startsWith("image/")) {
-      console.warn("画像ファイルではないため無視します。", file.type);
+    // MIME allowlist（png/jpeg/webp）で受理。SVG(intrinsic サイズ欠如)/GIF(先頭フレームのみ)等は
+    // 非空 type を持つため弾く。type 空は判定不能として通し、ロード側のフォールバックに委ねる。
+    if (isRejectedImageType(file.type)) {
+      console.warn("対応していない画像形式のため無視します。", file.type);
       return;
     }
-    // 過大画像対策のサイズ上限（~8MB）。
+    // 過大ファイルのサイズ上限（~8MB）。デコード後の画素寸法は main.ts が上限内へダウンスケールする。
     if (file.size > MAX_CRITTER_IMAGE_BYTES) {
       console.warn("画像サイズが大きすぎるため無視します。", file.size);
       return;
