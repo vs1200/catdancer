@@ -2,6 +2,13 @@ import type { AudioManager } from "../audio/AudioManager";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { AppMode, AppSettings, BackgroundSettings } from "../settings/settingsData";
 import { MAX_AUTO_SPAWN_INTERVAL_MS, MIN_AUTO_SPAWN_INTERVAL_MS } from "../settings/settingsData";
+import {
+  fullscreenButtonAriaLabel,
+  fullscreenButtonLabel,
+  isFullscreenActive,
+  isFullscreenSupported,
+  toggleAppFullscreen,
+} from "./fullscreen";
 import { ensureOptionsStyles } from "./optionsStyles";
 import { sliderToVolume, volumeToSlider } from "./volumeScale";
 
@@ -72,6 +79,8 @@ export class OptionsPanel {
   private onOpenChange?: (open: boolean) => void;
 
   private readonly closeButton: HTMLButtonElement;
+  /** 全画面トグルボタン。未対応ブラウザでは「表示」セクションごと生成しないため null。 */
+  private readonly fullscreenButton: HTMLButtonElement | null;
   private readonly modeSelect: HTMLSelectElement;
   private readonly intervalInput: HTMLInputElement;
   private readonly intervalValue: HTMLSpanElement;
@@ -122,6 +131,32 @@ export class OptionsPanel {
     closeButton.textContent = "×";
     closeButton.addEventListener("click", () => this.close());
     header.append(title, closeButton);
+
+    // --- 表示セクション（全画面トグル） ---
+    // Fullscreen API 未対応の環境では死んだボタンを出さない（セクションごと生成しない）。
+    // 生成できた時だけ card へ差し込む（差し込みは append 段で判定）。
+    let fullscreenButton: HTMLButtonElement | null = null;
+    let displaySection: HTMLElement | null = null;
+    if (isFullscreenSupported()) {
+      displaySection = document.createElement("section");
+      displaySection.className = "cd-options-section";
+      const displayTitle = document.createElement("h3");
+      displayTitle.className = "cd-options-section-title";
+      displayTitle.textContent = "表示";
+      displaySection.appendChild(displayTitle);
+
+      const fullscreenRow = document.createElement("div");
+      fullscreenRow.className = "cd-options-row";
+      fullscreenButton = document.createElement("button");
+      fullscreenButton.type = "button";
+      fullscreenButton.className = "cd-options-secondary";
+      // ラベル/aria は syncFullscreen() で現在の全画面状態に同期する（初期反映も同メソッド）。
+      fullscreenButton.addEventListener("click", () => {
+        void toggleAppFullscreen();
+      });
+      fullscreenRow.appendChild(fullscreenButton);
+      displaySection.appendChild(fullscreenRow);
+    }
 
     // --- モードセクション ---
     const modeSection = document.createElement("section");
@@ -324,7 +359,12 @@ export class OptionsPanel {
     volRow.append(volLabel, volumeInput, volumeValue);
     volSection.append(volTitle, volRow);
 
-    card.append(header, modeSection, bgSection, critterSection);
+    card.appendChild(header);
+    // 全画面対応環境でのみ「表示」セクションをヘッダ直後（モードセクションの前）へ差し込む。
+    if (displaySection) {
+      card.appendChild(displaySection);
+    }
+    card.append(modeSection, bgSection, critterSection);
     // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
     if (this.autoTypeChecks.length > 0) {
       card.appendChild(typesSection);
@@ -334,6 +374,7 @@ export class OptionsPanel {
 
     this.element = overlay;
     this.closeButton = closeButton;
+    this.fullscreenButton = fullscreenButton;
     this.modeSelect = modeSelect;
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
@@ -346,10 +387,13 @@ export class OptionsPanel {
 
     // Esc で閉じる（入力中にフォーカスがどこにあっても効くよう document で購読）。
     document.addEventListener("keydown", this.onKeyDown);
+    // F11/Esc など外部操作でも全画面状態に追従してラベルを同期する。destroy() で必ず外す。
+    document.addEventListener("fullscreenchange", this.onFullscreenChange);
 
     // 現在値を反映しつつ外部変更にも追従。
     this.unsubscribe = this.settings.subscribe((next) => this.syncFromSettings(next));
     this.syncFromSettings(this.settings.settings);
+    this.syncFullscreen();
   }
 
   /** 指定親へマウントする（通常 document.body）。 */
@@ -380,6 +424,7 @@ export class OptionsPanel {
     this.element.classList.add("cd-open");
     // 開いた時点の最新値を反映してからフォーカスを移す。
     this.syncFromSettings(this.settings.settings);
+    this.syncFullscreen();
     this.closeButton.focus();
     this.onOpenChange?.(true);
   }
@@ -403,6 +448,7 @@ export class OptionsPanel {
   destroy(): void {
     this.unsubscribe();
     document.removeEventListener("keydown", this.onKeyDown);
+    document.removeEventListener("fullscreenchange", this.onFullscreenChange);
     this.element.remove();
   }
 
@@ -411,6 +457,21 @@ export class OptionsPanel {
       this.close();
     }
   };
+
+  /** 全画面状態が変化したら（F11/Esc 含む）ボタンのラベル/aria を追従させる。 */
+  private readonly onFullscreenChange = (): void => {
+    this.syncFullscreen();
+  };
+
+  /** 全画面ボタンのラベル/aria を現在の全画面状態に同期する（未対応環境では何もしない）。 */
+  private syncFullscreen(): void {
+    if (!this.fullscreenButton) {
+      return;
+    }
+    const active = isFullscreenActive();
+    this.fullscreenButton.textContent = fullscreenButtonLabel(active);
+    this.fullscreenButton.setAttribute("aria-label", fullscreenButtonAriaLabel(active));
+  }
 
   private onFileChange(): void {
     const file = this.fileInput.files?.[0];
