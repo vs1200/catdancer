@@ -125,15 +125,22 @@ async function bootstrap(): Promise<void> {
   // createImageCritterType 登録 → AutoMode.addEntry。差し替え/削除では必ず objectURL を revoke する。
   // token で最新要求以外の結果を破棄し、連続変更時に旧画像が後から登録される/リークするのを防ぐ。
   let customCritterUrl: string | null = null;
+  let customCritterTexture: Texture | null = null;
   let customCritterToken = 0;
 
-  /** 現在のカスタム型/エントリ/objectURL を解放する（in-flight ロードも token 進行で無効化）。 */
+  /** 現在のカスタム型/エントリ/テクスチャ/objectURL を解放する（in-flight ロードも token 進行で無効化）。 */
   const teardownCustomCritter = (): void => {
     customCritterToken++;
     autoMode.removeEntry(CUSTOM_CRITTER_TYPE_ID);
+    // 画面上の当該種別 critter を先に despawn し、旧テクスチャを参照する Sprite を破棄する。
+    // （これを飛ばして texture.destroy すると、飛行中の critter の表示が壊れる。）
+    scene.despawnWhere((c) => c.state.typeId === CUSTOM_CRITTER_TYPE_ID);
     if (hasCritterType(CUSTOM_CRITTER_TYPE_ID)) {
       unregisterCritterType(CUSTOM_CRITTER_TYPE_ID);
     }
+    // 参照が切れた後にテクスチャを破棄する（destroy(true) で TextureSource ごと解放＝リーク防止）。
+    customCritterTexture?.destroy(true);
+    customCritterTexture = null;
     if (customCritterUrl) {
       URL.revokeObjectURL(customCritterUrl);
       customCritterUrl = null;
@@ -185,6 +192,7 @@ async function bootstrap(): Promise<void> {
       weight: CUSTOM_CRITTER_WEIGHT,
     });
     customCritterUrl = url;
+    customCritterTexture = texture;
   };
 
   // --- モード切替コントローラ ---
