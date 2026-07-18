@@ -1,0 +1,24 @@
+{
+  "name": "catdancer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "猫が見て楽しむWebアプリ（PixiJS v8 + Vite + TypeScript）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pixi.js": "^8.19.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}
