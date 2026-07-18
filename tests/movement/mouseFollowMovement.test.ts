@@ -7,6 +7,7 @@ import {
   computeFollowTarget,
   MOUSE_FOLLOW_DEFAULTS,
   MouseFollowMovement,
+  smoothDampToward,
 } from "../../src/movement/MouseFollowMovement";
 import type { MovementContext } from "../../src/movement/Movement";
 
@@ -175,5 +176,84 @@ describe("MouseFollowMovement", () => {
     new MouseFollowMovement().update(state, 1 / 60, ctxWith({ x: 400, y: 300 }));
     expect(Number.isFinite(state.position.x)).toBe(true);
     expect(Number.isFinite(state.velocity.x)).toBe(true);
+  });
+});
+
+describe("MouseFollowMovement 俊敏追従（新モデル/臨界減衰）", () => {
+  it("0.15秒で初期距離の 75% 超を詰める（もたつかない）", () => {
+    const state = stateAt(100, 300);
+    const target = { x: 400, y: 300 };
+    const initial = Math.hypot(target.x - state.position.x, target.y - state.position.y);
+    run(new MouseFollowMovement(), state, ctxWith(target), 9); // 9/60 = 0.15s
+    const dist = Math.hypot(target.x - state.position.x, target.y - state.position.y);
+    expect(dist).toBeLessThan(initial * 0.25);
+  });
+
+  it("0.25秒で静止目標の近傍(<20px)へ収束する", () => {
+    const state = stateAt(100, 300);
+    run(new MouseFollowMovement(), state, ctxWith({ x: 400, y: 300 }), 15); // 0.25s
+    const dist = Math.hypot(400 - state.position.x, 300 - state.position.y);
+    expect(dist).toBeLessThan(20);
+  });
+
+  it("遠距離ジャンプ(≈680px)でも 0.4秒で目標近傍(<60px)へ寄る", () => {
+    const state = stateAt(60, 300);
+    // x=740 は width-edgeThreshold(760) 未満なので延長されずそのまま目標になる。
+    run(new MouseFollowMovement(), state, ctxWith({ x: 740, y: 300 }), 24); // 0.4s
+    const dist = Math.hypot(740 - state.position.x, 300 - state.position.y);
+    expect(dist).toBeLessThan(60);
+  });
+
+  it("臨界減衰なのでオーバーシュートしない（目標を通り越して振動しない）", () => {
+    const state = stateAt(100, 300);
+    const m = new MouseFollowMovement();
+    const dt = 1 / 60;
+    let maxX = state.position.x;
+    for (let i = 0; i < 120; i++) {
+      m.update(state, dt, ctxWith({ x: 400, y: 300 }));
+      maxX = Math.max(maxX, state.position.x);
+    }
+    // 目標 x=400 をほぼ超えない（数値誤差の微小許容のみ）。
+    expect(maxX).toBeLessThanOrEqual(400 + 0.5);
+    // 最終的に目標へ収束している。
+    expect(Math.abs(state.position.x - 400)).toBeLessThan(1);
+  });
+});
+
+describe("smoothDampToward（臨界減衰スムージング純関数）", () => {
+  it("静止目標へ単調収束し velocity→0、NaN を出さない", () => {
+    const pos = { x: 0, y: 0 };
+    const vel = { x: 0, y: 0 };
+    const target = { x: 100, y: 50 };
+    for (let i = 0; i < 180; i++) {
+      smoothDampToward(pos, vel, target, 0.09, 3600, 1 / 60);
+    }
+    expect(Math.hypot(target.x - pos.x, target.y - pos.y)).toBeLessThan(0.5);
+    expect(Math.hypot(vel.x, vel.y)).toBeLessThan(1);
+    expect(Number.isFinite(pos.x) && Number.isFinite(vel.x)).toBe(true);
+  });
+
+  it("極端に大きな dt でも発散せず有限（無条件安定）", () => {
+    const pos = { x: 0, y: 0 };
+    const vel = { x: 0, y: 0 };
+    const target = { x: 100, y: 0 };
+    // 1 ステップに 100 秒（tab 復帰など想定外の巨大 dt）でも爆発しない。
+    smoothDampToward(pos, vel, target, 0.09, 3600, 100);
+    expect(Number.isFinite(pos.x)).toBe(true);
+    expect(Number.isFinite(vel.x)).toBe(true);
+    // 目標を大きく通り越したり NaN 化しない（0..100 の範囲に収まる）。
+    expect(pos.x).toBeGreaterThanOrEqual(0);
+    expect(pos.x).toBeLessThanOrEqual(100 + 1e-6);
+  });
+
+  it("1 ステップの変位は maxSpeed*dt を超えない（速度上限の担保）", () => {
+    const pos = { x: 0, y: 0 };
+    const vel = { x: 0, y: 0 };
+    const target = { x: 100000, y: 0 }; // 遥か遠方
+    const dt = 1 / 60;
+    const maxSpeed = 3600;
+    smoothDampToward(pos, vel, target, 0.09, maxSpeed, dt);
+    // change 頭打ちにより 1 フレームで maxSpeed*dt 以上は進まない。
+    expect(Math.hypot(pos.x, pos.y)).toBeLessThanOrEqual(maxSpeed * dt + 1e-6);
   });
 });

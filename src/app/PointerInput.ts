@@ -21,6 +21,12 @@ export class PointerInput {
   private readonly canvas: HTMLCanvasElement;
   private readonly getViewport: () => Viewport;
   private attached = false;
+  /**
+   * ユーザーが一度でも実際にポインタ操作(move/down)したか。
+   * 起動直後に稀に飛んでくる spurious な pointerleave/out で「画面外へ逃がす」挙動が誤発動し、
+   * ポインタ未操作なのにネズミが画面外へ走り去る不具合を防ぐ。初回操作までは leave を無視する。
+   */
+  private engaged = false;
 
   constructor(canvas: HTMLCanvasElement, getViewport: () => Viewport) {
     this.canvas = canvas;
@@ -49,17 +55,28 @@ export class PointerInput {
     this.canvas.removeEventListener("pointerout", this.onLeave);
   }
 
-  /** 現在の viewport 中心を初期ポインタにする（起動時にネズミが画面内に居るように）。 */
+  /**
+   * 現在の viewport 中心を初期ポインタにする（起動時にネズミが画面内に居るように）。
+   * ここで engaged はリセットしない: 一度操作したセッションでは leave→逃がす挙動を維持する。
+   */
   centerToViewport(): void {
     const vp = this.getViewport();
     this.pointer.value = { x: vp.width / 2, y: vp.height / 2 };
   }
 
   private readonly onMove = (event: PointerEvent): void => {
+    this.engaged = true;
     this.pointer.value = this.toWorld(event.clientX, event.clientY);
   };
 
+  /**
+   * canvas(＝ウィンドウ)外へ出たら value=null にして「画面外へ逃がす」。
+   * ただし初回操作前(engaged=false)の leave は spurious なので無視し、中央のまま留める。
+   */
   private readonly onLeave = (): void => {
+    if (!this.engaged) {
+      return;
+    }
     this.pointer.value = null;
   };
 

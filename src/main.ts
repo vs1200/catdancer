@@ -172,6 +172,27 @@ async function bootstrap(): Promise<void> {
       },
       // 画面上の critter を全消去（isolated スクショ用）。
       clear: () => scene.despawnAll(),
+      // マウス追従の客観計測用: ネズミ位置/速度・ポインタ(=追従目標)・距離を返す。
+      manual: () => {
+        const snap = manualMode.debugSnapshot();
+        if (!snap) {
+          return null;
+        }
+        const dist = snap.pointer
+          ? Math.hypot(snap.pointer.x - snap.position.x, snap.pointer.y - snap.position.y)
+          : null;
+        return {
+          ...snap,
+          speed: Math.hypot(snap.velocity.x, snap.velocity.y),
+          distanceToPointer: dist,
+        };
+      },
+      // canvas に pointermove を dispatch する検証補助（client 座標）。
+      dispatchPointer: (clientX: number, clientY: number) => {
+        app.canvas.dispatchEvent(
+          new PointerEvent("pointermove", { clientX, clientY, bubbles: true }),
+        );
+      },
     };
     // 設定 API（オプション画面が呼ぶ形）を検証用に露出する。
     // 例: __catSettings.setMode('auto') / setAutoSpawnInterval(800)

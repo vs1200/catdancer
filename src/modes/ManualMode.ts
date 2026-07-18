@@ -102,4 +102,28 @@ export class ManualMode implements Mode {
     const speed = Math.hypot(this.critter.state.velocity.x, this.critter.state.velocity.y);
     this.audioCtrl.update(speed, dtSeconds);
   }
+
+  /**
+   * DEV フック用の観測スナップショット（本番では main.ts 側の import.meta.env.DEV で除外）。
+   * 現在のネズミ位置/速度とポインタ（=追従目標）を返す。追従応答性の客観計測に使う。
+   */
+  debugSnapshot(): {
+    position: { x: number; y: number };
+    velocity: { x: number; y: number };
+    pointer: { x: number; y: number } | null;
+    running: boolean;
+    paused: boolean;
+  } | null {
+    if (!this.critter) {
+      return null;
+    }
+    const p = this.deps.pointer.pointer.value;
+    return {
+      position: { x: this.critter.state.position.x, y: this.critter.state.position.y },
+      velocity: { x: this.critter.state.velocity.x, y: this.critter.state.velocity.y },
+      pointer: p ? { x: p.x, y: p.y } : null,
+      running: this.running,
+      paused: this.paused,
+    };
+  }
 }

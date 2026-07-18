@@ -5,26 +5,27 @@ import type { CritterState } from "../critters/CritterState";
 import { updateFacingFromVelocity } from "../critters/CritterState";
 import type { Movement, MovementContext } from "./Movement";
 
-/** MouseFollowMovement の調整パラメータ（すべて px / 秒 系）。 */
+/** MouseFollowMovement の調整パラメータ。 */
 export interface MouseFollowOptions {
-  /** 目標へ向かう加速度(px/秒^2)。大きいほど機敏に追う。 */
-  accel?: number;
-  /** 最高速度(px/秒)。慣性で行き過ぎても速度はここで頭打ち。 */
+  /**
+   * 追従の時定数(秒)。目標へ寄り切るまでの概ねの所要時間。小さいほど俊敏に追う。
+   * 臨界減衰スムージング(SmoothDamp)の smoothTime に対応（≒ τ）。
+   */
+  smoothTime?: number;
+  /** 最高速度(px/秒)。巨大な瞬間移動でも速度はここで頭打ち。 */
   maxSpeed?: number;
-  /** 減衰率(1/秒)。速度は毎秒 exp(-damping) 倍に。大きいほど早く止まる。 */
-  damping?: number;
-  /** 到達半径(px)。この距離内では加速を距離比で弱め、静止目標での無限振動を防ぐ。 */
-  arriveRadius?: number;
   /** 画面端からこの距離(px)以内 or 画面外のポインタは、その辺の world 端(margin側)を目標にする。 */
   edgeThreshold?: number;
 }
 
-/** 既定パラメータ。ネズミが「少し遅れて追い、行き過ぎて戻る」じゃれる挙動になる値。 */
+/**
+ * 既定パラメータ。臨界減衰(ζ=1)で俊敏かつオーバーシュートせずに寄せる値。
+ * smoothTime=0.09s → 目標近傍(残り~5%)まで概ね 0.2s、full-screen flick でも ~0.3s 程度。
+ * maxSpeed は瞬間ワープを抑える保険（連続移動では時定数が支配的で滑らか）。
+ */
 export const MOUSE_FOLLOW_DEFAULTS = {
-  accel: 2200,
-  maxSpeed: 640,
-  damping: 2.6,
-  arriveRadius: 100,
+  smoothTime: 0.09,
+  maxSpeed: 3600,
   edgeThreshold: 40,
 } as const satisfies Required<MouseFollowOptions>;
 
@@ -32,6 +33,66 @@ export const MOUSE_FOLLOW_DEFAULTS = {
 const EPS = 1e-6;
 /** これ未満の |velocity.x| では facing を更新しない（静止付近のちらつき防止）。 */
 const FACING_MIN_SPEED = 5;
+
+/**
+ * 臨界減衰スムージング(Unity `SmoothDamp` 型)を 2D に適用する純関数(in-place)。
+ *
+ * position を target へ時定数 `smoothTime` で寄せ、velocity を更新する。臨界減衰(ζ=1)なので
+ * オーバーシュート・振動なしに素早く収束する。指数 e^{-x} を有理式で近似するため、極端な dt でも
+ * 発散しない（無条件安定）。change ベクトルの大きさを `maxSpeed*smoothTime` で頭打ちして最高速を保証する。
+ *
+ * 旧モデル(加速度＋指数摩擦, ζ≈0.28 の underdamped)は「行き過ぎて戻る」もたつきが出ていた。
+ * 本式は初速から一気に寄せて滑らかに止まる＝「素早く追従して離されない」体感になる。
+ */
+export function smoothDampToward(
+  position: Vec2,
+  velocity: Vec2,
+  target: Vec2,
+  smoothTime: number,
+  maxSpeed: number,
+  dt: number,
+): void {
+  const t = Math.max(1e-4, smoothTime);
+  const omega = 2 / t;
+  const x = omega * dt;
+  // e^{-x} の Nordahl 有理式近似（x が大きくても正の小値に収束＝安定）。
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+
+  // change = 目標からの変位。大きさを maxSpeed*smoothTime で頭打ちし、実効目標を近づける。
+  let cx = position.x - target.x;
+  let cy = position.y - target.y;
+  const maxChange = maxSpeed * t;
+  const mag = Math.hypot(cx, cy);
+  if (mag > maxChange && mag > EPS) {
+    const s = maxChange / mag;
+    cx *= s;
+    cy *= s;
+  }
+  const effTargetX = position.x - cx;
+  const effTargetY = position.y - cy;
+
+  // 臨界減衰の閉形式（各軸独立）。position/velocity を同時に更新する。
+  const tempX = (velocity.x + omega * cx) * dt;
+  const tempY = (velocity.y + omega * cy) * dt;
+  velocity.x = (velocity.x - omega * tempX) * exp;
+  velocity.y = (velocity.y - omega * tempY) * exp;
+  let outX = effTargetX + (cx + tempX) * exp;
+  let outY = effTargetY + (cy + tempY) * exp;
+
+  // オーバーシュート抑制: 元の目標を越えたら目標にスナップして速度を 0 に（振動を出さない）。
+  const wasBeforeTargetX = target.x - position.x > 0;
+  if (wasBeforeTargetX === outX > target.x) {
+    outX = target.x;
+    velocity.x = 0;
+  }
+  const wasBeforeTargetY = target.y - position.y > 0;
+  if (wasBeforeTargetY === outY > target.y) {
+    outY = target.y;
+    velocity.y = 0;
+  }
+  position.x = outX;
+  position.y = outY;
+}
 
 /**
  * ポインタが null（ウィンドウ外へ逃げた）ときの「画面外へ走り去る」目標を求める純関数。
@@ -99,28 +160,25 @@ export function computeFollowTarget(
 }
 
 /**
- * v1 の中核: ポインタ(world 座標)へ慣性追従する Movement。
+ * v1 の中核: ポインタ(world 座標)へ俊敏に追従する Movement。
  *
- * 物理は「目標方向へ加速(accel) → 減衰(damping) → 最高速(maxSpeed)で頭打ち → 位置積分」。
- * 到達半径内では加速を弱めるため静止目標でも無限振動せず自然に収束する。慣性ゆえに
- * 目標へ少し遅れて追い、行き過ぎて戻る「じゃれる」挙動が出る。
+ * 追従モデルは臨界減衰スムージング(SmoothDamp, {@link smoothDampToward})。旧モデルの
+ * 「加速＋指数摩擦(ζ≈0.28)」は行き過ぎて戻るもたつきが出ていたため、ζ=1 の閉形式へ刷新した。
+ * 目標へ初速から一気に寄り、オーバーシュートせず滑らかに止まる＝「速いカーソルにも離されない」体感。
+ * 生き物感は velocity 連続性（慣性）と短い時定数のわずかな遅れで担保する。
  *
  * 画面外バッファ(design 3.3): ポインタが画面端/外/null のとき目標を world 端へ延長し、
- * ネズミが画面外へ完全に隠れる。ポインタが戻れば再び画面内へ加速して再出現する。
+ * ネズミが画面外へ完全に隠れる。ポインタが戻れば再び画面内へ寄って再出現する。
  * 位置は world 内へクランプし（跳ね返らない）、壁に当たった軸の外向き速度は 0 にして暴走を防ぐ。
  */
 export class MouseFollowMovement implements Movement {
-  private readonly accel: number;
+  private readonly smoothTime: number;
   private readonly maxSpeed: number;
-  private readonly damping: number;
-  private readonly arriveRadius: number;
   private readonly edgeThreshold: number;
 
   constructor(options?: MouseFollowOptions) {
-    this.accel = options?.accel ?? MOUSE_FOLLOW_DEFAULTS.accel;
+    this.smoothTime = options?.smoothTime ?? MOUSE_FOLLOW_DEFAULTS.smoothTime;
     this.maxSpeed = options?.maxSpeed ?? MOUSE_FOLLOW_DEFAULTS.maxSpeed;
-    this.damping = options?.damping ?? MOUSE_FOLLOW_DEFAULTS.damping;
-    this.arriveRadius = options?.arriveRadius ?? MOUSE_FOLLOW_DEFAULTS.arriveRadius;
     this.edgeThreshold = options?.edgeThreshold ?? MOUSE_FOLLOW_DEFAULTS.edgeThreshold;
   }
 
@@ -138,24 +196,17 @@ export class MouseFollowMovement implements Movement {
       this.edgeThreshold,
     );
 
-    // 1) 目標方向へ加速（到達半径内では距離比で弱め、収束させる）。
-    const tx = target.x - state.position.x;
-    const ty = target.y - state.position.y;
-    const dist = Math.hypot(tx, ty);
-    if (dist > EPS) {
-      const inv = 1 / dist;
-      const scale = dist < this.arriveRadius ? dist / this.arriveRadius : 1;
-      const a = this.accel * scale * dtSeconds;
-      state.velocity.x += tx * inv * a;
-      state.velocity.y += ty * inv * a;
-    }
+    // 1) 臨界減衰スムージングで position/velocity を目標へ俊敏に寄せる（無条件安定）。
+    smoothDampToward(
+      state.position,
+      state.velocity,
+      target,
+      this.smoothTime,
+      this.maxSpeed,
+      dtSeconds,
+    );
 
-    // 2) 減衰（フレームレート非依存の指数摩擦）。
-    const k = Math.exp(-this.damping * dtSeconds);
-    state.velocity.x *= k;
-    state.velocity.y *= k;
-
-    // 3) 最高速で頭打ち。
+    // 2) 最高速で厳密に頭打ち（保険。SmoothDamp の change 頭打ちに加え暴走を防ぐ）。
     const speed = Math.hypot(state.velocity.x, state.velocity.y);
     if (speed > this.maxSpeed) {
       const s = this.maxSpeed / speed;
@@ -163,11 +214,7 @@ export class MouseFollowMovement implements Movement {
       state.velocity.y *= s;
     }
 
-    // 4) 位置を積分。
-    state.position.x += state.velocity.x * dtSeconds;
-    state.position.y += state.velocity.y * dtSeconds;
-
-    // 5) world 内へクランプ（跳ね返らない）。壁に当たった軸の外向き速度は 0 に。
+    // 3) world 内へクランプ（跳ね返らない）。壁に当たった軸の外向き速度は 0 に。
     if (state.position.x < world.minX) {
       state.position.x = world.minX;
       if (state.velocity.x < 0) state.velocity.x = 0;
@@ -183,7 +230,7 @@ export class MouseFollowMovement implements Movement {
       if (state.velocity.y > 0) state.velocity.y = 0;
     }
 
-    // 6) 進行方向で facing 更新（静止付近のちらつきは閾値で抑制）。
+    // 4) 進行方向で facing 更新（静止付近のちらつきは閾値で抑制）。
     if (Math.abs(state.velocity.x) > FACING_MIN_SPEED) {
       updateFacingFromVelocity(state);
     }
