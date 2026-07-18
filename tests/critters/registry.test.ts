@@ -8,8 +8,10 @@ import {
   hasCritterType,
   listCritterTypes,
   registerCritterType,
+  unregisterCritterType,
 } from "../../src/critters/registry";
 import { FOXTAIL_TYPE_ID, registerFoxtailType } from "../../src/critters/types/foxtail";
+import { createImageCritterType } from "../../src/critters/types/imageCritter";
 import { INSECT_TYPE_ID, registerInsectType } from "../../src/critters/types/insect";
 import { MOUSE_TYPE_ID, registerMouseType } from "../../src/critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "../../src/critters/types/toys";
@@ -54,6 +56,17 @@ describe("registry", () => {
 
   it("未登録 id の取得はエラー", () => {
     expect(() => getCritterType("none")).toThrow();
+  });
+
+  it("unregisterCritterType は登録を解除する（未登録は no-op で例外を投げない）", () => {
+    registerCritterType(makeType("custom"));
+    expect(hasCritterType("custom")).toBe(true);
+    unregisterCritterType("custom");
+    expect(hasCritterType("custom")).toBe(false);
+    // 解除後は再登録できる（id 重複エラーにならない）。
+    expect(() => registerCritterType(makeType("custom"))).not.toThrow();
+    // 未登録 id の解除は no-op（例外を投げない）。
+    expect(() => unregisterCritterType("does-not-exist")).not.toThrow();
   });
 
   it("createCritterStateFromType は種別既定値を使い、id と defaultFacing/baseSize を反映", () => {
@@ -143,5 +156,37 @@ describe("registry", () => {
       expect(plan.position.y).toBeGreaterThanOrEqual(world.minY);
       expect(plan.position.y).toBeLessThanOrEqual(world.maxY);
     }
+  });
+});
+
+describe("createImageCritterType", () => {
+  it("無回転(flip)・尻尾/sway なし・横断(CrossMovement)の画像クリッター型を生成する", () => {
+    const type = createImageCritterType("custom", "blob:fake-url");
+    expect(type.id).toBe("custom");
+    expect(type.textureUrl).toBe("blob:fake-url");
+    expect(type.defaultFacing).toBe(1);
+    expect(type.hasTail).toBe(false);
+    expect(type.sway).toBeUndefined();
+    // 上下反転を絶対に起こさないため rotate は使わない（既定 flip = 水平反転のみ）。
+    expect(type.faceMode).toBe("flip");
+    expect(type.flipWithFacing).toBe(true);
+    // 既定サイズは程よい ~200。
+    expect(type.baseSize).toBe(200);
+    // フォールバック / AutoMode どちらも CrossMovement（画面外から横断→despawn）。
+    expect(type.createMovement()).toBeInstanceOf(CrossMovement);
+    const world = createWorldBounds({ width: 800, height: 600 }, 300);
+    const plan = type.createAutoSpawn?.(world, () => 0.5);
+    expect(plan?.movement).toBeInstanceOf(CrossMovement);
+    // spawn 位置は world 内（初フレームで即 despawn しない）。
+    expect(plan).toBeDefined();
+    if (plan) {
+      expect(plan.position.x).toBeGreaterThanOrEqual(world.minX);
+      expect(plan.position.x).toBeLessThanOrEqual(world.maxX);
+    }
+  });
+
+  it("baseSize を上書きできる", () => {
+    const type = createImageCritterType("custom", "blob:x", 120);
+    expect(type.baseSize).toBe(120);
   });
 });

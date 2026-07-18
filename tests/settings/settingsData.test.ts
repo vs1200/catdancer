@@ -112,6 +112,7 @@ describe("createDefaultSettings", () => {
       masterVolume: DEFAULT_MASTER_VOLUME,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+      customCritterImageId: null,
     });
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
     expect(DEFAULT_MASTER_VOLUME).toBe(0.5);
@@ -137,12 +138,14 @@ describe("normalizeSettings", () => {
         masterVolume: 0.8,
         mode: "auto",
         autoSpawnIntervalMs: 900,
+        customCritterImageId: "critter-1",
       }),
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
       masterVolume: 0.8,
       mode: "auto",
       autoSpawnIntervalMs: 900,
+      customCritterImageId: "critter-1",
     });
   });
 
@@ -175,6 +178,20 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ background: { imageId: "k" } }).background.imageId).toBe("k");
   });
 
+  it("customCritterImageId は非空文字列のみ、それ以外は null（欠損/型不一致フォールバック）", () => {
+    // 欠損はデフォルト null。
+    expect(normalizeSettings({}).customCritterImageId).toBeNull();
+    // 非空文字列のみ受理。
+    expect(normalizeSettings({ customCritterImageId: "critter-abc" }).customCritterImageId).toBe(
+      "critter-abc",
+    );
+    // 空文字/型不一致は null。
+    expect(normalizeSettings({ customCritterImageId: "" }).customCritterImageId).toBeNull();
+    expect(normalizeSettings({ customCritterImageId: 7 }).customCritterImageId).toBeNull();
+    expect(normalizeSettings({ customCritterImageId: null }).customCritterImageId).toBeNull();
+    expect(normalizeSettings({ customCritterImageId: {} }).customCritterImageId).toBeNull();
+  });
+
   it("不正な色/音量はフォールバック/クランプ", () => {
     const s = normalizeSettings({
       background: { color: "not-a-color" },
@@ -192,6 +209,7 @@ describe("serializeSettings / parseSettings", () => {
       masterVolume: 0.33,
       mode: "auto" as const,
       autoSpawnIntervalMs: 2400,
+      customCritterImageId: "critter-xyz",
     };
     const restored = parseSettings(serializeSettings(original));
     expect(restored).toEqual(original);
@@ -203,6 +221,7 @@ describe("serializeSettings / parseSettings", () => {
     expect(Object.keys(parsed).sort()).toEqual([
       "autoSpawnIntervalMs",
       "background",
+      "customCritterImageId",
       "masterVolume",
       "mode",
     ]);
@@ -225,6 +244,7 @@ describe("serializeSettings / parseSettings", () => {
       masterVolume: 0.2,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+      customCritterImageId: null,
     });
   });
 });

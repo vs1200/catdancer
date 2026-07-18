@@ -1,4 +1,9 @@
-import { pruneImagesExcept, putImage } from "./imageStore";
+import {
+  pruneCritterImagesExcept,
+  pruneImagesExcept,
+  putCritterImage,
+  putImage,
+} from "./imageStore";
 import type { AppMode, AppSettings, BackgroundType } from "./settingsData";
 import {
   clampSpawnInterval,
@@ -45,6 +50,7 @@ export class SettingsStore {
       masterVolume: this.state.masterVolume,
       mode: this.state.mode,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
+      customCritterImageId: this.state.customCritterImageId,
     };
   }
 
@@ -73,7 +79,7 @@ export class SettingsStore {
    */
   setBackgroundImage(blob: Blob): Promise<void> {
     return this.enqueueImageOp(async () => {
-      const id = generateImageId();
+      const id = generateImageId("bg");
       try {
         await putImage(id, blob);
       } catch (error) {
@@ -102,6 +108,40 @@ export class SettingsStore {
       this.commit();
       // 画像は保持しないので IDB を全掃除する。
       await pruneImagesExcept(null);
+    });
+  }
+
+  /**
+   * ユーザー任意画像クリッター（単一スロット）を設定する。Blob を IndexedDB（"critterImages"）へ
+   * 保存してから customCritterImageId を更新する。IDB 保存に失敗した場合は設定を変更しない（ガード）。
+   *
+   * 背景画像 set と同じ流儀: enqueueImageOp で直列化し、put→commit→掃除 が割り込まれないため
+   * 取りこぼし orphan も、古い掃除が現行画像を誤削除する事故も起きない（常に最後の呼び出しが勝ち、
+   * "critterImages" には現行 1 枚だけが残る）。掃除は critterImages ストア限定＝背景を消さない。
+   */
+  setCustomCritterImage(blob: Blob): Promise<void> {
+    return this.enqueueImageOp(async () => {
+      const id = generateImageId("critter");
+      try {
+        await putCritterImage(id, blob);
+      } catch (error) {
+        console.warn("クリッター画像の保存に失敗しました。設定は変更しません。", error);
+        return;
+      }
+      this.state.customCritterImageId = id;
+      this.commit();
+      // 保持するのは常にこの 1 枚のみ。旧画像/残骸をまとめて掃除する（背景は触らない）。
+      await pruneCritterImagesExcept(id);
+    });
+  }
+
+  /** ユーザー任意画像クリッターを破棄する（IDB の critterImages を全掃除）。画像 I/O は直列化する。 */
+  clearCustomCritterImage(): Promise<void> {
+    return this.enqueueImageOp(async () => {
+      this.state.customCritterImageId = null;
+      this.commit();
+      // 画像は保持しないので critterImages を全掃除する（背景は触らない）。
+      await pruneCritterImagesExcept(null);
     });
   }
 
@@ -167,17 +207,20 @@ export class SettingsStore {
   }
 }
 
-/** 画像 ID を生成する（crypto.randomUUID 優先、非対応環境はフォールバック）。 */
-function generateImageId(): string {
+/**
+ * 画像 ID を生成する（crypto.randomUUID 優先、非対応環境はフォールバック）。
+ * prefix で用途を区別する（背景="bg" / クリッター="critter"）。
+ */
+function generateImageId(prefix: string): string {
   try {
     const c = (globalThis as { crypto?: Crypto }).crypto;
     if (c && typeof c.randomUUID === "function") {
-      return `bg-${c.randomUUID()}`;
+      return `${prefix}-${c.randomUUID()}`;
     }
   } catch {
     // crypto 参照が例外になる環境ではフォールバックへ。
   }
-  return `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function readLocalStorage(key: string): string | null {

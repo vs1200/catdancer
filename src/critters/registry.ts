@@ -26,6 +26,14 @@ export function hasCritterType(id: string): boolean {
   return registry.has(id);
 }
 
+/**
+ * 登録済み種別を解除する（未登録は no-op）。
+ * ユーザー任意画像クリッターの差し替え/削除で、旧種別を安全に外すために使う。
+ */
+export function unregisterCritterType(id: string): void {
+  registry.delete(id);
+}
+
 export function listCritterTypes(): CritterType[] {
   return [...registry.values()];
 }

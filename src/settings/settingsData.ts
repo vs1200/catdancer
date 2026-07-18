@@ -30,6 +30,11 @@ export interface AppSettings {
   mode: AppMode;
   /** auto モードのオブジェクト出現間隔(ms)。 */
   autoSpawnIntervalMs: number;
+  /**
+   * ユーザー任意画像クリッター（単一スロット）の IndexedDB キー（"critterImages" ストア）。
+   * 未設定は null。画像バイナリは容量的に IndexedDB へ。ここには id のみを持つ。
+   */
+  customCritterImageId: string | null;
 }
 
 /** 既定の背景色（単色 白）。 */
@@ -110,6 +115,7 @@ export function createDefaultSettings(): AppSettings {
     masterVolume: DEFAULT_MASTER_VOLUME,
     mode: DEFAULT_MODE,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+    customCritterImageId: null,
   };
 }
 
@@ -123,6 +129,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   masterVolume: DEFAULT_MASTER_VOLUME,
   mode: DEFAULT_MODE,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+  customCritterImageId: null,
 }) as AppSettings;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -140,12 +147,18 @@ export function normalizeSettings(raw: unknown): AppSettings {
   const type: BackgroundType = bg.type === "image" ? "image" : "color";
   const color = normalizeHexColor(bg.color, DEFAULT_BACKGROUND_COLOR);
   const imageId = typeof bg.imageId === "string" && bg.imageId.length > 0 ? bg.imageId : null;
+  // 非空文字列のみ受理。欠損/型不一致は null フォールバック（背景 imageId と同じ流儀）。
+  const customCritterImageId =
+    typeof obj.customCritterImageId === "string" && obj.customCritterImageId.length > 0
+      ? obj.customCritterImageId
+      : null;
 
   return {
     background: { type, color, imageId },
     masterVolume: clampVolume(obj.masterVolume),
     mode: normalizeMode(obj.mode),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
+    customCritterImageId,
   };
 }
 
@@ -160,6 +173,7 @@ export function serializeSettings(settings: AppSettings): string {
     masterVolume: settings.masterVolume,
     mode: settings.mode,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
+    customCritterImageId: settings.customCritterImageId,
   };
   return JSON.stringify(plain);
 }
