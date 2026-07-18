@@ -109,6 +109,32 @@ export class AutoMode implements Mode {
     this.scheduler.setInterval(ms);
   }
 
+  /**
+   * 出現対象の種別エントリを動的に追加する（実行中でも即反映）。
+   * 同一 typeId が既にあれば置換する（bodyTexture/weight を差し替え、重複出現を防ぐ）。
+   * entries と weights は常に同じ index 対応を保つ（weightedIndex が破綻しないため）。
+   */
+  addEntry(entry: AutoModeEntry): void {
+    const idx = this.deps.entries.findIndex((e) => e.typeId === entry.typeId);
+    if (idx >= 0) {
+      this.deps.entries[idx] = entry;
+      this.weights[idx] = entry.weight;
+      return;
+    }
+    this.deps.entries.push(entry);
+    this.weights.push(entry.weight);
+  }
+
+  /** 指定 typeId の種別エントリを取り除く（未登録は no-op。実行中でも即反映）。 */
+  removeEntry(typeId: string): void {
+    const idx = this.deps.entries.findIndex((e) => e.typeId === typeId);
+    if (idx < 0) {
+      return;
+    }
+    this.deps.entries.splice(idx, 1);
+    this.weights.splice(idx, 1);
+  }
+
   update(dtSeconds: number): void {
     if (!this.running || this.paused) {
       return;

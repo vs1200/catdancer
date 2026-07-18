@@ -1,12 +1,19 @@
-import { Assets } from "pixi.js";
+import { Assets, Texture } from "pixi.js";
 import { BackgroundController } from "./app/BackgroundController";
 import { CatDancerApp } from "./app/CatDancerApp";
 import { PointerInput } from "./app/PointerInput";
 import { DEFAULT_WORLD_MARGIN, Scene } from "./app/Scene";
 import { AudioManager } from "./audio/AudioManager";
 import { MOUSE_SQUEAK_ID, registerCritterSounds } from "./audio/sounds";
-import { getCritterType, listCritterTypes } from "./critters/registry";
+import {
+  getCritterType,
+  hasCritterType,
+  listCritterTypes,
+  registerCritterType,
+  unregisterCritterType,
+} from "./critters/registry";
 import { FOXTAIL_TYPE_ID, registerFoxtailType } from "./critters/types/foxtail";
+import { createImageCritterType } from "./critters/types/imageCritter";
 import { INSECT_TYPE_ID, registerInsectType } from "./critters/types/insect";
 import { MOUSE_TAIL_TEXTURE_URL, MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "./critters/types/toys";
@@ -14,10 +21,16 @@ import { computeWorldMargin } from "./critters/worldMargin";
 import { AutoMode } from "./modes/AutoMode";
 import { ManualMode } from "./modes/ManualMode";
 import type { Mode } from "./modes/Mode";
+import { getCritterImage } from "./settings/imageStore";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
 import { OptionsButton } from "./ui/OptionsButton";
 import { OptionsPanel } from "./ui/OptionsPanel";
+
+/** ユーザー任意画像クリッターの固定種別 id（単一スロット。imageId は設定 customCritterImageId に持つ）。 */
+const CUSTOM_CRITTER_TYPE_ID = "custom";
+/** ユーザー任意画像クリッターの出現重み（他種別と混ざって程よく出る）。 */
+const CUSTOM_CRITTER_WEIGHT = 1.5;
 
 /**
  * catdancer エントリ（v2 土台: モード切替 + spawn/despawn 基盤）。
@@ -107,6 +120,73 @@ async function bootstrap(): Promise<void> {
     intervalMs: settings.settings.autoSpawnIntervalMs,
   });
 
+  // --- ユーザー任意画像クリッター（単一スロット）の動的ロード/破棄 ---
+  // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Assets.load →
+  // createImageCritterType 登録 → AutoMode.addEntry。差し替え/削除では必ず objectURL を revoke する。
+  // token で最新要求以外の結果を破棄し、連続変更時に旧画像が後から登録される/リークするのを防ぐ。
+  let customCritterUrl: string | null = null;
+  let customCritterToken = 0;
+
+  /** 現在のカスタム型/エントリ/objectURL を解放する（in-flight ロードも token 進行で無効化）。 */
+  const teardownCustomCritter = (): void => {
+    customCritterToken++;
+    autoMode.removeEntry(CUSTOM_CRITTER_TYPE_ID);
+    if (hasCritterType(CUSTOM_CRITTER_TYPE_ID)) {
+      unregisterCritterType(CUSTOM_CRITTER_TYPE_ID);
+    }
+    if (customCritterUrl) {
+      URL.revokeObjectURL(customCritterUrl);
+      customCritterUrl = null;
+    }
+  };
+
+  /** imageId のカスタム画像をロードして種別登録＋AutoMode エントリ追加する（失敗時は安全に無視）。 */
+  const loadCustomCritter = async (imageId: string): Promise<void> => {
+    const token = ++customCritterToken;
+    let blob: Blob | null = null;
+    try {
+      blob = await getCritterImage(imageId);
+    } catch {
+      blob = null;
+    }
+    if (token !== customCritterToken) {
+      return; // 後続要求に追い越された。
+    }
+    if (!blob) {
+      return; // IDB に無い（削除済み/未対応）。
+    }
+    // blob objectURL は拡張子が無く Assets.load の loader 推定が効かないため、背景画像と同じく
+    // Image.decode → Texture.from でテクスチャ化する（拡張子非依存で確実）。
+    const url = URL.createObjectURL(blob);
+    let texture: Texture;
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      texture = Texture.from(image);
+    } catch {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    if (token !== customCritterToken) {
+      // ロード中に追い越された → 生成物を破棄（リーク防止）。
+      texture.destroy(true);
+      URL.revokeObjectURL(url);
+      return;
+    }
+    // 念のため既存カスタム型が残っていれば外してから再登録する（id 重複エラーを避ける）。
+    if (hasCritterType(CUSTOM_CRITTER_TYPE_ID)) {
+      unregisterCritterType(CUSTOM_CRITTER_TYPE_ID);
+    }
+    registerCritterType(createImageCritterType(CUSTOM_CRITTER_TYPE_ID, url));
+    autoMode.addEntry({
+      typeId: CUSTOM_CRITTER_TYPE_ID,
+      bodyTexture: texture,
+      weight: CUSTOM_CRITTER_WEIGHT,
+    });
+    customCritterUrl = url;
+  };
+
   // --- モード切替コントローラ ---
   let currentMode: Mode | null = null;
   let currentModeName: AppMode = settings.settings.mode;
@@ -124,9 +204,10 @@ async function bootstrap(): Promise<void> {
     currentMode.setPaused(panelOpen);
   };
 
-  // 設定変更の反映（音量/背景 + モード/出現間隔）。前回値と比較して差分だけ反映する。
+  // 設定変更の反映（音量/背景 + モード/出現間隔 + カスタム画像クリッター）。前回値と比較して差分だけ反映する。
   let prevMode = settings.settings.mode;
   let prevInterval = settings.settings.autoSpawnIntervalMs;
+  let prevCustomCritterId = settings.settings.customCritterImageId;
   settings.subscribe((next) => {
     audio.setMasterVolume(next.masterVolume);
     void backgroundController.apply(next);
@@ -138,11 +219,24 @@ async function bootstrap(): Promise<void> {
       prevMode = next.mode;
       switchTo(next.mode);
     }
+    if (next.customCritterImageId !== prevCustomCritterId) {
+      prevCustomCritterId = next.customCritterImageId;
+      // 設定時/クリア時いずれも、まず現行カスタムを破棄（objectURL revoke 込み）してから、
+      // 設定時は新規ロード（登録＋addEntry）する。
+      teardownCustomCritter();
+      if (next.customCritterImageId) {
+        void loadCustomCritter(next.customCritterImageId);
+      }
+    }
   });
 
   // 起動時復元: 背景（色 or IDB 画像）と音量を適用。
   await backgroundController.apply(settings.settings);
   audio.setMasterVolume(settings.settings.masterVolume);
+  // 起動時復元: カスタム画像クリッター（あれば IDB からロードして AutoMode に追加）。
+  if (settings.settings.customCritterImageId) {
+    await loadCustomCritter(settings.settings.customCritterImageId);
+  }
 
   // オプション画面（右下ボタン→設定パネル）。パネルは settings の公開 API を呼ぶ。
   // 開いている間は現行モードを一時停止（Manual は追従を止め、Auto は spawn を止める）。

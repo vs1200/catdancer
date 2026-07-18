@@ -22,6 +22,9 @@ import { sliderToVolume, volumeToSlider } from "./volumeScale";
  * カード上の pointerdown は stopPropagation してバックドロップの外側クリック判定に漏らさない。
  */
 
+/** カスタム画像クリッターの受理サイズ上限(bytes, ~8MB)。過大画像で IDB/描画を詰まらせない。 */
+const MAX_CRITTER_IMAGE_BYTES = 8 * 1024 * 1024;
+
 export interface OptionsPanelOptions {
   /** 設定の単一の真実源。全ての変更はこの公開 API を呼ぶ。 */
   settings: SettingsStore;
@@ -46,6 +49,7 @@ export class OptionsPanel {
   private readonly intervalRow: HTMLDivElement;
   private readonly colorInput: HTMLInputElement;
   private readonly fileInput: HTMLInputElement;
+  private readonly critterFileInput: HTMLInputElement;
   private readonly volumeInput: HTMLInputElement;
   private readonly volumeValue: HTMLSpanElement;
 
@@ -195,6 +199,47 @@ export class OptionsPanel {
 
     bgSection.append(colorRow, imageRow, resetRow);
 
+    // --- オブジェクトセクション（ユーザー任意画像クリッター・単一スロット） ---
+    const critterSection = document.createElement("section");
+    critterSection.className = "cd-options-section";
+    const critterTitle = document.createElement("h3");
+    critterTitle.className = "cd-options-section-title";
+    critterTitle.textContent = "オブジェクト";
+    critterSection.appendChild(critterTitle);
+
+    // オブジェクト画像（1枚。label でボタン化し、実 input は視覚的に隠す）
+    const critterImageRow = document.createElement("div");
+    critterImageRow.className = "cd-options-row";
+    const critterLabelText = document.createElement("span");
+    critterLabelText.className = "cd-options-label";
+    critterLabelText.textContent = "オブジェクト画像";
+    const critterFileButton = document.createElement("label");
+    critterFileButton.className = "cd-options-file-button";
+    critterFileButton.textContent = "画像を選択";
+    critterFileButton.htmlFor = "cd-critter-image-input";
+    const critterFileInput = document.createElement("input");
+    critterFileInput.type = "file";
+    critterFileInput.id = "cd-critter-image-input";
+    critterFileInput.accept = "image/*";
+    critterFileInput.className = "cd-visually-hidden";
+    critterFileInput.addEventListener("change", () => this.onCritterFileChange());
+    critterFileButton.appendChild(critterFileInput);
+    critterImageRow.append(critterLabelText, critterFileButton);
+
+    // 削除（カスタム画像クリッターを消す）
+    const critterResetRow = document.createElement("div");
+    critterResetRow.className = "cd-options-row";
+    const critterClearButton = document.createElement("button");
+    critterClearButton.type = "button";
+    critterClearButton.className = "cd-options-secondary";
+    critterClearButton.textContent = "オブジェクト画像を削除";
+    critterClearButton.addEventListener("click", () => {
+      void this.settings.clearCustomCritterImage();
+    });
+    critterResetRow.appendChild(critterClearButton);
+
+    critterSection.append(critterImageRow, critterResetRow);
+
     // --- 音量セクション ---
     const volSection = document.createElement("section");
     volSection.className = "cd-options-section";
@@ -219,7 +264,7 @@ export class OptionsPanel {
     volRow.append(volLabel, volumeInput, volumeValue);
     volSection.append(volTitle, volRow);
 
-    card.append(header, modeSection, bgSection, volSection);
+    card.append(header, modeSection, bgSection, critterSection, volSection);
     overlay.appendChild(card);
 
     this.element = overlay;
@@ -230,6 +275,7 @@ export class OptionsPanel {
     this.intervalRow = intervalRow;
     this.colorInput = colorInput;
     this.fileInput = fileInput;
+    this.critterFileInput = critterFileInput;
     this.volumeInput = volumeInput;
     this.volumeValue = volumeValue;
 
@@ -315,6 +361,27 @@ export class OptionsPanel {
       return;
     }
     void this.settings.setBackgroundImage(file);
+  }
+
+  private onCritterFileChange(): void {
+    const file = this.critterFileInput.files?.[0];
+    // 同一ファイルの再選択でも change が発火するよう毎回クリアする。
+    this.critterFileInput.value = "";
+    if (!file) {
+      return;
+    }
+    // 画像 MIME 検証: type が明示的に非画像なら無駄な IDB 書き込みをせず無視する
+    // （type 空は判定不能なので通し、ロード側のデコード失敗フォールバックに委ねる）。
+    if (file.type && !file.type.startsWith("image/")) {
+      console.warn("画像ファイルではないため無視します。", file.type);
+      return;
+    }
+    // 過大画像対策のサイズ上限（~8MB）。
+    if (file.size > MAX_CRITTER_IMAGE_BYTES) {
+      console.warn("画像サイズが大きすぎるため無視します。", file.size);
+      return;
+    }
+    void this.settings.setCustomCritterImage(file);
   }
 
   private onVolumeInput(): void {
