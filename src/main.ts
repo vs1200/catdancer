@@ -185,6 +185,9 @@ async function bootstrap(): Promise<void> {
           ...snap,
           speed: Math.hypot(snap.velocity.x, snap.velocity.y),
           distanceToPointer: dist,
+          // 回転検証の人間可読補助: heading を度数化、鏡像(左半分)かどうか。
+          headingDeg: (snap.heading * 180) / Math.PI,
+          mirrored: snap.viewScaleY < 0,
         };
       },
       // canvas に pointermove を dispatch する検証補助（client 座標）。

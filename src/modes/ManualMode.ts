@@ -113,6 +113,12 @@ export class ManualMode implements Mode {
     pointer: { x: number; y: number } | null;
     running: boolean;
     paused: boolean;
+    /** state.heading(rad)。回転方式(rotate)の追従角。 */
+    heading: number;
+    /** 実 view.rotation(rad)。heading と一致するはず（回転検証用）。 */
+    viewRotation: number;
+    /** view.scale.y。左半分(鏡像)で -1（上下逆さ回避の検証用）。 */
+    viewScaleY: number;
   } | null {
     if (!this.critter) {
       return null;
@@ -124,6 +130,9 @@ export class ManualMode implements Mode {
       pointer: p ? { x: p.x, y: p.y } : null,
       running: this.running,
       paused: this.paused,
+      heading: this.critter.state.heading,
+      viewRotation: this.critter.view.rotation,
+      viewScaleY: this.critter.view.scale.y,
     };
   }
 }

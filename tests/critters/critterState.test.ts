@@ -29,6 +29,37 @@ describe("CritterState", () => {
     expect(state.facing).toBe(-1);
   });
 
+  it("heading 既定: 初速があればその向き、無ければ facing(右=0/左=π)", () => {
+    // 初速なし・右向き → 0
+    const right = createCritterState({ typeId: "t", position: { x: 0, y: 0 }, size: 10 });
+    expect(right.heading).toBeCloseTo(0);
+    // 初速なし・左向き → π
+    const left = createCritterState({
+      typeId: "t",
+      position: { x: 0, y: 0 },
+      facing: -1,
+      size: 10,
+    });
+    expect(left.heading).toBeCloseTo(Math.PI);
+    // 初速あり → atan2(vy,vx)（facing より優先）
+    const moving = createCritterState({
+      typeId: "t",
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 100 },
+      size: 10,
+    });
+    expect(moving.heading).toBeCloseTo(Math.PI / 2);
+    // 明示指定が最優先
+    const explicit = createCritterState({
+      typeId: "t",
+      position: { x: 0, y: 0 },
+      velocity: { x: 100, y: 0 },
+      heading: 1.23,
+      size: 10,
+    });
+    expect(explicit.heading).toBeCloseTo(1.23);
+  });
+
   it("applyMovement は速度 * dt で位置を積分する", () => {
     const state = createCritterState({
       typeId: "t",

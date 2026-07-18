@@ -61,6 +61,15 @@ export interface AutoSpawnPlan {
 }
 
 /**
+ * 向きの表現方式。
+ * - 'flip': 進行方向(facing)で水平反転のみ（左右）。dangle 系・単純な種別の既定。
+ * - 'rotate': 速度の heading へスプライトを360度回転し鼻先を進行方向へ向ける（上下含む全方位）。
+ *   左半分(cos(heading)<0)は鏡像反転で上下を自然に保つ。右向きテクスチャ前提(defaultFacing=1)。
+ *   ネズミが使う。将来 鳥/魚 も再利用可能。sway(dangle 系)とは併用しない。
+ */
+export type FaceMode = "flip" | "rotate";
+
+/**
  * 種別定義。新オブジェクトは「この型を1つ定義 + アセット」で追加できる。
  */
 export interface CritterType {
@@ -88,10 +97,15 @@ export interface CritterType {
    */
   readonly sway?: SwayConfig;
   /**
-   * 進行方向で水平反転するか。省略/true=反転する（ネズミ）、false=反転しない（dangle 系は
-   * 回転 sway が主なので反転を強制しない）。
+   * 進行方向で水平反転するか。省略/true=反転する、false=反転しない（dangle 系は
+   * 回転 sway が主なので反転を強制しない）。faceMode='rotate' では参照されない。
    */
   readonly flipWithFacing?: boolean;
+  /**
+   * 向きの表現方式（省略時 'flip'）。走行系（ネズミ）は 'rotate'（進行方向へ360度回頭）。
+   * 'rotate' は右向きテクスチャ前提で、sway(dangle 系)とは併用しない。
+   */
+  readonly faceMode?: FaceMode;
   /**
    * AutoMode 用の spawn 計画を生成する（種別ごとに位置/初速/Movement を決める）。
    * rng は [0,1) を返す関数（テスト差し替え可能）。未定義の種別は AutoMode の対象にしない。

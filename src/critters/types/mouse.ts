@@ -24,8 +24,8 @@ export const mouseType: CritterType = {
   defaultFacing: 1,
   // v1 マウス操作モードの既定。ポインタへ慣性追従＋画面外バッファで出現/消失する。
   createMovement: () => new MouseFollowMovement(),
-  // AutoMode では左右いずれかの端から横断する（CrossMovement）。進行方向で水平反転する。
-  flipWithFacing: true,
+  // 進行方向へ360度回頭（左半分は鏡像反転で上下を自然に保つ）。右向きテクスチャ前提。
+  faceMode: "rotate",
   createAutoSpawn: (world, rng) => {
     const plan = planCrossSpawn(world, rng);
     return {

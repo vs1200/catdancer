@@ -2,7 +2,8 @@ import type { Texture } from "pixi.js";
 import { Container, Sprite } from "pixi.js";
 import type { Movement, MovementContext } from "../movement/Movement";
 import type { CritterState, Facing } from "./CritterState";
-import type { SwayConfig, TailConfig } from "./CritterType";
+import type { FaceMode, SwayConfig, TailConfig } from "./CritterType";
+import { type HeadingUpdateOptions, isMirroredHeading, updateHeading } from "./heading";
 import { pivotOffsetPx } from "./pivot";
 import type { CritterSpawnOptions } from "./registry";
 import { createCritterStateFromType, getCritterType } from "./registry";
@@ -11,6 +12,13 @@ import { createRopeTail } from "./tail/RopeTail";
 
 /** 尻尾の揺れ勢い(intensity)を 1 に飽和させる基準速度(px/秒)。 */
 const TAIL_INTENSITY_REF_SPEED = 220;
+
+/**
+ * faceMode='rotate' の回頭パラメータ。
+ * holdMinSpeed: これ以下の速さでは回頭せず向きを保つ（静止で回らない）。
+ * smoothTime: 回頭の時定数。生き物らしく素早いが滑らかに旋回する値。
+ */
+const HEADING_UPDATE_OPTS: HeadingUpdateOptions = { holdMinSpeed: 6, smoothTime: 0.06 };
 
 export interface CritterViewOptions {
   /** 素材の既定向き。反転式 scale.x = facing * defaultFacing に用いる。 */
@@ -26,6 +34,11 @@ export interface CritterViewOptions {
   sway?: SwayConfig;
   /** 進行方向で水平反転するか（省略/true=反転。dangle 系は false）。 */
   flipWithFacing?: boolean;
+  /**
+   * 向きの表現方式（省略時 'flip'）。'rotate' は速度の heading へ全方位回転する（ネズミ）。
+   * 右向きテクスチャ前提で、sway とは併用しない。
+   */
+  faceMode?: FaceMode;
 }
 
 /**
@@ -45,8 +58,10 @@ export class Critter {
   private readonly baseScale: number;
   /** 素材の既定向き（反転式で使用）。 */
   private readonly defaultFacing: Facing;
-  /** 進行方向で水平反転するか（dangle 系は false）。 */
+  /** 進行方向で水平反転するか（dangle 系は false）。faceMode='rotate' では未使用。 */
   private readonly flipWithFacing: boolean;
+  /** 向きの表現方式（'flip'=水平反転 / 'rotate'=全方位回転）。 */
+  private readonly faceMode: FaceMode;
   /** 尻尾（無ければ null）。 */
   private readonly tail: RopeTail | null;
   /** 回転 sway 用の内側 Container（pivot を支点に回す。無ければ null）。 */
@@ -64,6 +79,7 @@ export class Critter {
     this.movement = movement;
     this.defaultFacing = options?.defaultFacing ?? 1;
     this.flipWithFacing = options?.flipWithFacing ?? true;
+    this.faceMode = options?.faceMode ?? "flip";
 
     this.view = new Container();
     this.sprite = new Sprite(texture);
@@ -105,6 +121,17 @@ export class Critter {
     this.movement.update(this.state, dtSeconds, ctx);
     this.elapsedSeconds += dtSeconds;
 
+    // rotate 系は速度ベクトルから heading を平滑更新（静止時は保持＝くるくる回らない）。
+    if (this.faceMode === "rotate") {
+      this.state.heading = updateHeading(
+        this.state.heading,
+        this.state.velocity.x,
+        this.state.velocity.y,
+        dtSeconds,
+        HEADING_UPDATE_OPTS,
+      );
+    }
+
     if (this.tail) {
       const speed = Math.hypot(this.state.velocity.x, this.state.velocity.y);
       const intensity = Math.min(speed / TAIL_INTENSITY_REF_SPEED, 1);
@@ -115,14 +142,25 @@ export class Critter {
   }
 
   /**
-   * state → 表示同期。位置反映と、必要なら facing*defaultFacing による Container 左右反転、
-   * sway があれば pivot 周りの回転(state.rotation)を反映する。
+   * state → 表示同期。位置反映と向きの反映を行う。
+   * - faceMode='rotate': view を heading へ回転し、左半分は鏡像反転(scale.y=-1)で上下を自然に保つ。
+   *   view ごと回すため子（尻尾 MeshRope）も付け根を保ったまま本体回転に追従する。
+   *   右向きテクスチャ前提のため scale.x は反転せず defaultFacing(=1) のまま（heading が全方位を表現）。
+   * - faceMode='flip'（既定）: 回転せず facing*defaultFacing で水平反転のみ。sway があれば
+   *   pivot 周りの回転(state.rotation)を内側 Container に反映する。
    */
   private syncView(): void {
     this.view.position.set(this.state.position.x, this.state.position.y);
-    this.view.scale.x = this.flipWithFacing
-      ? this.state.facing * this.defaultFacing
-      : this.defaultFacing;
+    if (this.faceMode === "rotate") {
+      this.view.rotation = this.state.heading;
+      this.view.scale.set(this.defaultFacing, isMirroredHeading(this.state.heading) ? -1 : 1);
+    } else {
+      this.view.rotation = 0;
+      this.view.scale.set(
+        this.flipWithFacing ? this.state.facing * this.defaultFacing : this.defaultFacing,
+        1,
+      );
+    }
     if (this.swayContainer) {
       this.swayContainer.rotation = this.state.rotation;
     }
@@ -172,5 +210,6 @@ export function spawnCritter(params: SpawnCritterParams): Critter {
     tailTexture: params.tailTexture,
     sway: type.sway,
     flipWithFacing: type.flipWithFacing,
+    faceMode: type.faceMode,
   });
 }

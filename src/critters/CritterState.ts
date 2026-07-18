@@ -22,6 +22,12 @@ export interface CritterState {
    * 表示側(Critter)が pivot を支点とした回転へ反映する。既定 0（走る/追従系は使わない）。
    */
   rotation: number;
+  /**
+   * 進行方向角(rad)。faceMode='rotate' の critter が全方位回転に用いる（速度の atan2(vy,vx) を
+   * 最短経路で平滑補間した値）。表示側(Critter)が view.rotation と鏡像反転(scale.y)へ反映する。
+   * facing（左右反転）とは独立: flip 系は facing、rotate 系は heading を使う。既定 0（右向き）。
+   */
+  heading: number;
 }
 
 export interface CritterStateInit {
@@ -32,16 +38,24 @@ export interface CritterStateInit {
   size: number;
   /** 初期回転角(rad)。省略時 0。 */
   rotation?: number;
+  /** 初期 heading(rad)。省略時は初速の向き→facing(左=π/右=0) から導く。 */
+  heading?: number;
 }
 
 export function createCritterState(init: CritterStateInit): CritterState {
+  const facing = init.facing ?? 1;
+  const vx = init.velocity?.x ?? 0;
+  const vy = init.velocity?.y ?? 0;
+  const speed = Math.hypot(vx, vy);
   return {
     typeId: init.typeId,
     position: { x: init.position.x, y: init.position.y },
     velocity: init.velocity ? { x: init.velocity.x, y: init.velocity.y } : { x: 0, y: 0 },
-    facing: init.facing ?? 1,
+    facing,
     size: init.size,
     rotation: init.rotation ?? 0,
+    // spawn 直後に不要な回頭をしないよう、指定 > 初速の向き > facing(左=π/右=0) の順で決める。
+    heading: init.heading ?? (speed > 1e-6 ? Math.atan2(vy, vx) : facing === -1 ? Math.PI : 0),
   };
 }
 
