@@ -6,6 +6,7 @@ import {
 } from "./imageStore";
 import type { AppMode, AppSettings, BackgroundType } from "./settingsData";
 import {
+  clampPlayLimitMinutes,
   clampSpawnInterval,
   clampVolume,
   normalizeHexColor,
@@ -50,6 +51,7 @@ export class SettingsStore {
       masterVolume: this.state.masterVolume,
       mode: this.state.mode,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
+      autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
       customCritterImageId: this.state.customCritterImageId,
       autoDisabledTypes: [...this.state.autoDisabledTypes],
     };
@@ -161,6 +163,14 @@ export class SettingsStore {
   /** auto モードの出現間隔(ms)を設定する（範囲外はクランプして永続化＋通知）。 */
   setAutoSpawnInterval(ms: number): void {
     this.state.autoSpawnIntervalMs = clampSpawnInterval(ms);
+    this.commit();
+  }
+
+  /**
+   * auto モードの遊びすぎ防止タイマー上限(分)を設定する（0＝OFF。範囲外はクランプして永続化＋通知）。
+   */
+  setAutoPlayLimitMinutes(minutes: number): void {
+    this.state.autoPlayLimitMinutes = clampPlayLimitMinutes(minutes);
     this.commit();
   }
 

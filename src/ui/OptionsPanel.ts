@@ -1,7 +1,11 @@
 import type { AudioManager } from "../audio/AudioManager";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { AppMode, AppSettings, BackgroundSettings } from "../settings/settingsData";
-import { MAX_AUTO_SPAWN_INTERVAL_MS, MIN_AUTO_SPAWN_INTERVAL_MS } from "../settings/settingsData";
+import {
+  AUTO_PLAY_LIMIT_OPTIONS_MINUTES,
+  MAX_AUTO_SPAWN_INTERVAL_MS,
+  MIN_AUTO_SPAWN_INTERVAL_MS,
+} from "../settings/settingsData";
 import {
   fullscreenButtonAriaLabel,
   fullscreenButtonLabel,
@@ -85,6 +89,8 @@ export class OptionsPanel {
   private readonly intervalInput: HTMLInputElement;
   private readonly intervalValue: HTMLSpanElement;
   private readonly intervalRow: HTMLDivElement;
+  private readonly playLimitSelect: HTMLSelectElement;
+  private readonly playLimitRow: HTMLDivElement;
   private readonly colorInput: HTMLInputElement;
   private readonly fileInput: HTMLInputElement;
   private readonly critterFileInput: HTMLInputElement;
@@ -206,7 +212,28 @@ export class OptionsPanel {
     intervalInput.addEventListener("input", () => this.onIntervalInput());
     intervalRow.append(intervalLabel, intervalInput, intervalValue);
 
-    modeSection.append(modeRow, intervalRow);
+    // 遊びすぎ防止（auto モードのみ有効）。一定時間後に自動停止する上限(分)を選ぶ。0=なし。
+    const playLimitRow = document.createElement("div");
+    playLimitRow.className = "cd-options-row";
+    const playLimitLabel = document.createElement("label");
+    playLimitLabel.className = "cd-options-label";
+    playLimitLabel.textContent = "遊びすぎ防止";
+    playLimitLabel.htmlFor = "cd-playlimit-select";
+    const playLimitSelect = document.createElement("select");
+    playLimitSelect.id = "cd-playlimit-select";
+    playLimitSelect.className = "cd-options-select";
+    for (const minutes of AUTO_PLAY_LIMIT_OPTIONS_MINUTES) {
+      const option = document.createElement("option");
+      option.value = String(minutes);
+      option.textContent = formatPlayLimitMinutes(minutes);
+      playLimitSelect.appendChild(option);
+    }
+    playLimitSelect.addEventListener("change", () => {
+      this.settings.setAutoPlayLimitMinutes(Number(playLimitSelect.value));
+    });
+    playLimitRow.append(playLimitLabel, playLimitSelect);
+
+    modeSection.append(modeRow, intervalRow, playLimitRow);
 
     // --- 背景セクション ---
     const bgSection = document.createElement("section");
@@ -379,6 +406,8 @@ export class OptionsPanel {
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
     this.intervalRow = intervalRow;
+    this.playLimitSelect = playLimitSelect;
+    this.playLimitRow = playLimitRow;
     this.colorInput = colorInput;
     this.fileInput = fileInput;
     this.critterFileInput = critterFileInput;
@@ -527,7 +556,7 @@ export class OptionsPanel {
 
   /** 現在の設定値をコントロールへ反映する（起動時・外部変更・開いた時に呼ぶ）。 */
   private syncFromSettings(settings: AppSettings): void {
-    this.syncMode(settings.mode, settings.autoSpawnIntervalMs);
+    this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
@@ -543,7 +572,7 @@ export class OptionsPanel {
     }
   }
 
-  private syncMode(mode: AppMode, intervalMs: number): void {
+  private syncMode(mode: AppMode, intervalMs: number, playLimitMinutes: number): void {
     if (this.modeSelect.value !== mode) {
       this.modeSelect.value = mode;
     }
@@ -552,10 +581,17 @@ export class OptionsPanel {
       this.intervalInput.value = text;
     }
     this.intervalValue.textContent = formatIntervalMs(intervalMs);
-    // 出現間隔は auto モードのみ有効。manual では無効化して意味を明確にする。
+    // 出現間隔・遊びすぎ防止は auto モードのみ有効。manual では無効化して意味を明確にする。
     const disabled = mode !== "auto";
     this.intervalInput.disabled = disabled;
     this.intervalRow.classList.toggle("cd-options-row-disabled", disabled);
+
+    const playLimitText = String(playLimitMinutes);
+    if (this.playLimitSelect.value !== playLimitText) {
+      this.playLimitSelect.value = playLimitText;
+    }
+    this.playLimitSelect.disabled = disabled;
+    this.playLimitRow.classList.toggle("cd-options-row-disabled", disabled);
   }
 
   private syncBackground(background: BackgroundSettings): void {
@@ -579,4 +615,9 @@ export class OptionsPanel {
 /** 出現間隔(ms)を「x.x秒」表記にする（UI 表示用）。 */
 function formatIntervalMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}秒`;
+}
+
+/** 遊びすぎ防止の上限(分)を表示ラベルにする（0＝なし）。 */
+function formatPlayLimitMinutes(minutes: number): string {
+  return minutes <= 0 ? "なし" : `${minutes}分`;
 }

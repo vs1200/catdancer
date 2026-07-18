@@ -22,11 +22,13 @@ import { computeWorldMargin } from "./critters/worldMargin";
 import { AutoMode } from "./modes/AutoMode";
 import { ManualMode } from "./modes/ManualMode";
 import type { Mode } from "./modes/Mode";
+import { PlayLimitTimer } from "./modes/PlayLimitTimer";
 import { getCritterImage } from "./settings/imageStore";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
 import { OptionsButton } from "./ui/OptionsButton";
 import { OptionsPanel } from "./ui/OptionsPanel";
+import { PlayLimitOverlay } from "./ui/PlayLimitOverlay";
 
 /** ユーザー任意画像クリッターの固定種別 id（単一スロット。imageId は設定 customCritterImageId に持つ）。 */
 const CUSTOM_CRITTER_TYPE_ID = "custom";
@@ -208,10 +210,35 @@ async function bootstrap(): Promise<void> {
 
   const modeByName = (name: AppMode): Mode => (name === "auto" ? autoMode : manualMode);
 
+  // --- 遊びすぎ防止タイマー（auto の active 再生時間で自動停止） ---
+  // auto かつ非パネル・未停止のフレームだけ tick し、上限到達で auto を止めて（despawn＋無音）
+  // 再開オーバーレイを出す。人間が「再開」を押すか、設定で上限を変えると再武装して復帰する。
+  const playLimitTimer = new PlayLimitTimer(settings.settings.autoPlayLimitMinutes);
+  let autoStoppedByTimer = false;
+  const playLimitOverlay = new PlayLimitOverlay({ onResume: () => resumeFromPlayLimit() });
+  playLimitOverlay.mount(document.body);
+
+  /** 自動停止を解除して auto を再開する（オーバーレイ hide＋タイマー再武装。停止中のみ有効）。 */
+  function resumeFromPlayLimit(): void {
+    if (!autoStoppedByTimer) {
+      return;
+    }
+    autoStoppedByTimer = false;
+    playLimitOverlay.hide();
+    playLimitTimer.reset();
+    autoMode.start();
+    // パネルが開いていれば一時停止を引き継ぐ。
+    autoMode.setPaused(panelOpen);
+  }
+
   /** 現行モードを止め、指定モードへ切り替える（前モードの critter を後始末してから開始）。 */
   const switchTo = (name: AppMode): void => {
     currentMode?.stop();
     currentModeName = name;
+    // モード切替はタイマーも仕切り直す（auto へ入り直したら遊びすぎ防止も最初から）。
+    autoStoppedByTimer = false;
+    playLimitOverlay.hide();
+    playLimitTimer.reset();
     currentMode = modeByName(name);
     currentMode.start();
     // 切替後もパネル開閉状態を引き継ぐ（開いていれば新モードも一時停止）。
@@ -222,7 +249,8 @@ async function bootstrap(): Promise<void> {
   // 素早く逃がし（画面外へ→despawn）反応SEを鳴らす。auto かつパネルが閉じている時のみ有効
   // （manual はネズミがカーソル追従なので対象外／パネル開時は backdrop が捕らえるが二重の保険）。
   app.canvas.addEventListener("pointerdown", (event) => {
-    if (currentModeName !== "auto" || panelOpen) {
+    // 自動停止中はタップで逃走させない（オーバーレイが前面で受けるが二重の保険）。
+    if (currentModeName !== "auto" || panelOpen || autoStoppedByTimer) {
       return;
     }
     const p = clientToWorld(app.canvas, app.viewport, event.clientX, event.clientY);
@@ -232,6 +260,7 @@ async function bootstrap(): Promise<void> {
   // 設定変更の反映（音量/背景 + モード/出現間隔 + カスタム画像クリッター）。前回値と比較して差分だけ反映する。
   let prevMode = settings.settings.mode;
   let prevInterval = settings.settings.autoSpawnIntervalMs;
+  let prevPlayLimit = settings.settings.autoPlayLimitMinutes;
   let prevCustomCritterId = settings.settings.customCritterImageId;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join(" ");
@@ -241,6 +270,15 @@ async function bootstrap(): Promise<void> {
     if (next.autoSpawnIntervalMs !== prevInterval) {
       prevInterval = next.autoSpawnIntervalMs;
       autoMode.setInterval(next.autoSpawnIntervalMs);
+    }
+    if (next.autoPlayLimitMinutes !== prevPlayLimit) {
+      prevPlayLimit = next.autoPlayLimitMinutes;
+      // 上限変更で再武装（elapsed/発火状態リセット）。停止中に変更されたら解除して auto を再開する
+      // （設定変更で停止状態のまま固まらない）。
+      playLimitTimer.setLimitMinutes(next.autoPlayLimitMinutes);
+      if (autoStoppedByTimer) {
+        resumeFromPlayLimit();
+      }
     }
     const nextAutoDisabledKey = next.autoDisabledTypes.join(" ");
     if (nextAutoDisabledKey !== prevAutoDisabledKey) {
@@ -346,6 +384,29 @@ async function bootstrap(): Promise<void> {
           new PointerEvent("pointerdown", { clientX, clientY, bubbles: true }),
         );
       },
+      // 遊びすぎ防止タイマーの観測/検証補助。
+      playLimit: {
+        // 自動停止中か。
+        stopped: () => autoStoppedByTimer,
+        // 残り時間(ms)。無効(OFF)時は Infinity。
+        remainingMs: () => playLimitTimer.remainingMs,
+        // 再開（オーバーレイの「再開」相当）。
+        resume: () => resumeFromPlayLimit(),
+        // 検証補助: 今すぐ上限到達させて自動停止まで通す（要: auto モード＋上限設定済み・非パネル）。
+        // 実時間を待たずに「停止→オーバーレイ→無音」までを配線ごと確認するための観測用フック。
+        forceExpire: (): boolean => {
+          if (currentModeName !== "auto" || panelOpen || autoStoppedByTimer) {
+            return false;
+          }
+          if (playLimitTimer.tick(1e9)) {
+            autoMode.stop();
+            autoStoppedByTimer = true;
+            playLimitOverlay.show();
+            return true;
+          }
+          return false;
+        },
+      },
     };
     // 設定 API（オプション画面が呼ぶ形）を検証用に露出する。
     // 例: __catSettings.setMode('auto') / setAutoSpawnInterval(800)
@@ -367,7 +428,21 @@ async function bootstrap(): Promise<void> {
 
   // 毎フレーム現行モードを更新する。
   app.ticker.add((ticker) => {
-    currentMode?.update(ticker.deltaMS / 1000);
+    const dt = ticker.deltaMS / 1000;
+    currentMode?.update(dt);
+    // 遊びすぎ防止: auto の active 再生（パネル閉・未停止）フレームだけ積算する。
+    // tick は update の後（このフレームの描画整合を保つ）。上限到達で自動停止＝
+    // despawn＋無音にして再開オーバーレイを出す。
+    if (
+      currentModeName === "auto" &&
+      !panelOpen &&
+      !autoStoppedByTimer &&
+      playLimitTimer.tick(dt)
+    ) {
+      autoMode.stop();
+      autoStoppedByTimer = true;
+      playLimitOverlay.show();
+    }
   });
 }
 

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampPlayLimitMinutes,
   clampSpawnInterval,
   clampVolume,
   createDefaultSettings,
+  DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   DEFAULT_BACKGROUND_COLOR,
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
+  MAX_AUTO_PLAY_LIMIT_MINUTES,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
   normalizeAutoDisabledTypes,
@@ -137,14 +140,45 @@ describe("clampSpawnInterval", () => {
   });
 });
 
+describe("clampPlayLimitMinutes", () => {
+  it("非負の整数はそのまま（0=OFF 含む）", () => {
+    expect(clampPlayLimitMinutes(0)).toBe(0);
+    expect(clampPlayLimitMinutes(5)).toBe(5);
+    expect(clampPlayLimitMinutes(30)).toBe(30);
+  });
+
+  it("小数は四捨五入する", () => {
+    expect(clampPlayLimitMinutes(4.4)).toBe(4);
+    expect(clampPlayLimitMinutes(4.6)).toBe(5);
+  });
+
+  it("上限を超える値は MAX へクランプ", () => {
+    expect(clampPlayLimitMinutes(9999)).toBe(MAX_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(MAX_AUTO_PLAY_LIMIT_MINUTES)).toBe(MAX_AUTO_PLAY_LIMIT_MINUTES);
+  });
+
+  it("負値/非有限/数値化不能は 0（OFF）へ", () => {
+    expect(clampPlayLimitMinutes(-5)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(Number.NaN)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(Number.POSITIVE_INFINITY)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(undefined)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes("abc")).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+  });
+
+  it("数値文字列は解釈する", () => {
+    expect(clampPlayLimitMinutes("15")).toBe(15);
+  });
+});
+
 describe("createDefaultSettings", () => {
-  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 無効種別なし", () => {
+  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし", () => {
     const s = createDefaultSettings();
     expect(s).toEqual({
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
       masterVolume: DEFAULT_MASTER_VOLUME,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+      autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
     });
@@ -152,6 +186,7 @@ describe("createDefaultSettings", () => {
     expect(DEFAULT_MASTER_VOLUME).toBe(0.5);
     expect(DEFAULT_MODE).toBe("manual");
     expect(DEFAULT_AUTO_SPAWN_INTERVAL_MS).toBe(1500);
+    expect(DEFAULT_AUTO_PLAY_LIMIT_MINUTES).toBe(0);
   });
 
   it("呼び出しごとに独立したオブジェクトを返す（共有参照でない）", () => {
@@ -175,6 +210,7 @@ describe("normalizeSettings", () => {
         masterVolume: 0.8,
         mode: "auto",
         autoSpawnIntervalMs: 900,
+        autoPlayLimitMinutes: 15,
         customCritterImageId: "critter-1",
         autoDisabledTypes: ["insect", "toys"],
       }),
@@ -183,6 +219,7 @@ describe("normalizeSettings", () => {
       masterVolume: 0.8,
       mode: "auto",
       autoSpawnIntervalMs: 900,
+      autoPlayLimitMinutes: 15,
       customCritterImageId: "critter-1",
       autoDisabledTypes: ["insect", "toys"],
     });
@@ -251,6 +288,7 @@ describe("normalizeSettings", () => {
       masterVolume: 0.7,
       mode: "auto",
       autoSpawnIntervalMs: 1200,
+      autoPlayLimitMinutes: 30,
       customCritterImageId: "critter-9",
       autoDisabledTypes: ["toys"],
     });
@@ -258,8 +296,19 @@ describe("normalizeSettings", () => {
     expect(s.masterVolume).toBe(0.7);
     expect(s.mode).toBe("auto");
     expect(s.autoSpawnIntervalMs).toBe(1200);
+    expect(s.autoPlayLimitMinutes).toBe(30);
     expect(s.customCritterImageId).toBe("critter-9");
     expect(s.autoDisabledTypes).toEqual(["toys"]);
+  });
+
+  it("autoPlayLimitMinutes は欠損で 0、負/非有限で 0、上限超は clamp、小数は round", () => {
+    expect(normalizeSettings({}).autoPlayLimitMinutes).toBe(0);
+    expect(normalizeSettings({ autoPlayLimitMinutes: -3 }).autoPlayLimitMinutes).toBe(0);
+    expect(normalizeSettings({ autoPlayLimitMinutes: Number.NaN }).autoPlayLimitMinutes).toBe(0);
+    expect(normalizeSettings({ autoPlayLimitMinutes: 4.6 }).autoPlayLimitMinutes).toBe(5);
+    expect(normalizeSettings({ autoPlayLimitMinutes: 9999 }).autoPlayLimitMinutes).toBe(
+      MAX_AUTO_PLAY_LIMIT_MINUTES,
+    );
   });
 
   it("不正な色/音量はフォールバック/クランプ", () => {
@@ -279,6 +328,7 @@ describe("serializeSettings / parseSettings", () => {
       masterVolume: 0.33,
       mode: "auto" as const,
       autoSpawnIntervalMs: 2400,
+      autoPlayLimitMinutes: 10,
       customCritterImageId: "critter-xyz",
       autoDisabledTypes: ["foxtail", "insect"],
     };
@@ -291,6 +341,7 @@ describe("serializeSettings / parseSettings", () => {
     const parsed = JSON.parse(json) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual([
       "autoDisabledTypes",
+      "autoPlayLimitMinutes",
       "autoSpawnIntervalMs",
       "background",
       "customCritterImageId",
@@ -316,6 +367,7 @@ describe("serializeSettings / parseSettings", () => {
       masterVolume: 0.2,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+      autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
     });

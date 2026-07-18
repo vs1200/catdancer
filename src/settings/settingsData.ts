@@ -31,6 +31,11 @@ export interface AppSettings {
   /** auto モードのオブジェクト出現間隔(ms)。 */
   autoSpawnIntervalMs: number;
   /**
+   * auto（猫用動画）モードの遊びすぎ防止タイマー上限(分)。既定 0（OFF＝無制限）。
+   * 到達すると自動停止し、動くオブジェクトを消して無音の穏やかな背景のみにする。
+   */
+  autoPlayLimitMinutes: number;
+  /**
    * ユーザー任意画像クリッター（単一スロット）の IndexedDB キー（"critterImages" ストア）。
    * 未設定は null。画像バイナリは容量的に IndexedDB へ。ここには id のみを持つ。
    */
@@ -55,6 +60,12 @@ export const DEFAULT_AUTO_SPAWN_INTERVAL_MS = 1500;
 export const MIN_AUTO_SPAWN_INTERVAL_MS = 200;
 /** 出現間隔の上限(ms)。 */
 export const MAX_AUTO_SPAWN_INTERVAL_MS = 8000;
+/** 遊びすぎ防止タイマーの既定上限(分)。0＝OFF（無制限）。 */
+export const DEFAULT_AUTO_PLAY_LIMIT_MINUTES = 0;
+/** 遊びすぎ防止タイマーの上限(分)の上限値（永続値の暴走ガード）。 */
+export const MAX_AUTO_PLAY_LIMIT_MINUTES = 180;
+/** UI に並べる遊びすぎ防止の選択肢(分)。0＝なし（OFF）。 */
+export const AUTO_PLAY_LIMIT_OPTIONS_MINUTES: readonly number[] = [0, 5, 10, 15, 30];
 
 /** `#rgb` / `#rrggbb`（大小文字可）を受理する正規表現。 */
 const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -127,6 +138,19 @@ export function clampSpawnInterval(value: unknown): number {
       : n;
 }
 
+/**
+ * 遊びすぎ防止の上限(分)を正規化する。数値化できない/非有限/負は 0（OFF）へ。
+ * それ以外は Math.round して [0, MAX] にクランプする（UI はプリセットに制約するが永続値は堅牢に扱う）。
+ */
+export function clampPlayLimitMinutes(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return DEFAULT_AUTO_PLAY_LIMIT_MINUTES;
+  }
+  const rounded = Math.round(n);
+  return rounded > MAX_AUTO_PLAY_LIMIT_MINUTES ? MAX_AUTO_PLAY_LIMIT_MINUTES : rounded;
+}
+
 /** デフォルト設定を新規生成する（呼び出しごとに独立したオブジェクト）。 */
 export function createDefaultSettings(): AppSettings {
   return {
@@ -138,6 +162,7 @@ export function createDefaultSettings(): AppSettings {
     masterVolume: DEFAULT_MASTER_VOLUME,
     mode: DEFAULT_MODE,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+    autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
     customCritterImageId: null,
     autoDisabledTypes: [],
   };
@@ -153,6 +178,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   masterVolume: DEFAULT_MASTER_VOLUME,
   mode: DEFAULT_MODE,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+  autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   customCritterImageId: null,
   autoDisabledTypes: Object.freeze([] as string[]) as string[],
 }) as AppSettings;
@@ -183,6 +209,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     masterVolume: clampVolume(obj.masterVolume),
     mode: normalizeMode(obj.mode),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
+    autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
     customCritterImageId,
     autoDisabledTypes: normalizeAutoDisabledTypes(obj.autoDisabledTypes),
   };
@@ -199,6 +226,7 @@ export function serializeSettings(settings: AppSettings): string {
     masterVolume: settings.masterVolume,
     mode: settings.mode,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
+    autoPlayLimitMinutes: settings.autoPlayLimitMinutes,
     customCritterImageId: settings.customCritterImageId,
     autoDisabledTypes: [...settings.autoDisabledTypes],
   };
