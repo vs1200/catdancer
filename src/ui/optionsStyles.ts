@@ -221,6 +221,23 @@ const CSS = `
   width: 100%;
 }
 
+/* 出現プリセットのボタン群（横並び・均等幅。cd-options-secondary の width:100% を上書きして 3 分割する）。 */
+.cd-options-preset-group {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+}
+.cd-options-preset-group .cd-options-secondary {
+  flex: 1 1 0;
+  width: auto;
+  padding: 7px 8px;
+}
+/* 無効化行（manual モード）のプリセットボタンは操作不可を明示する（range と同じ流儀）。 */
+.cd-options-row-disabled .cd-options-secondary {
+  cursor: not-allowed;
+}
+
 /* file input は視覚的に隠すが DOM 上には残す（自動化アップロード対象になれるように）。 */
 .cd-visually-hidden {
   position: absolute;

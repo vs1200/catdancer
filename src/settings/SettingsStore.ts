@@ -9,12 +9,14 @@ import {
   clampPlayLimitMinutes,
   clampSpawnInterval,
   clampVolume,
+  normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeMode,
   normalizeMuted,
   parseSettings,
   serializeSettings,
 } from "./settingsData";
+import type { SpawnPreset } from "./spawnPresets";
 
 /**
  * アプリ設定を保持・購読・永続化するストア。
@@ -199,6 +201,18 @@ export class SettingsStore {
     } else if (idx < 0) {
       disabled.push(typeId);
     }
+    this.commit();
+  }
+
+  /**
+   * 出現プリセット（賑やか/標準/控えめ）を一括適用する（永続化＋通知は commit 1 回のみ）。
+   * autoSpawnIntervalMs と autoDisabledTypes をまとめて設定するため購読者への通知は 1 回で済み、
+   * main の subscribe が interval と disabledTypes の両差分を 1 パスで反映する。
+   * disabledTypes は外部の readonly 配列を共有せず、コピー＆正規化（非文字列/重複を除去）して state に持つ。
+   */
+  applySpawnPreset(preset: SpawnPreset): void {
+    this.state.autoSpawnIntervalMs = clampSpawnInterval(preset.intervalMs);
+    this.state.autoDisabledTypes = normalizeAutoDisabledTypes([...preset.disabledTypes]);
     this.commit();
   }
 

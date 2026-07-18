@@ -6,6 +6,7 @@ import {
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
 } from "../settings/settingsData";
+import { SPAWN_PRESETS } from "../settings/spawnPresets";
 import {
   fullscreenButtonAriaLabel,
   fullscreenButtonLabel,
@@ -86,6 +87,10 @@ export class OptionsPanel {
   /** 全画面トグルボタン。未対応ブラウザでは「表示」セクションごと生成しないため null。 */
   private readonly fullscreenButton: HTMLButtonElement | null;
   private readonly modeSelect: HTMLSelectElement;
+  /** 出現プリセット行（auto モードのみ有効。manual では presetRow ごと淡色化＋ボタン無効化）。 */
+  private readonly presetRow: HTMLDivElement;
+  /** 出現プリセットボタン群（manual モードで一括 disabled にする）。 */
+  private readonly presetButtons: HTMLButtonElement[] = [];
   private readonly intervalInput: HTMLInputElement;
   private readonly intervalValue: HTMLSpanElement;
   private readonly intervalRow: HTMLDivElement;
@@ -195,6 +200,29 @@ export class OptionsPanel {
     });
     modeRow.append(modeLabel, modeSelect);
 
+    // 出現プリセット（auto モードのみ有効）。出現間隔＋出現する種類をワンタップで束ねて切り替える。
+    // ボタン click → settings.applySpawnPreset。適用後は syncFromSettings 経由で interval スライダ表示・
+    // 「出現する種類」チェックが新しい値へ自動追従する（applySpawnPreset の通知で syncFromSettings が走る）。
+    const presetRow = document.createElement("div");
+    presetRow.className = "cd-options-row";
+    const presetLabel = document.createElement("span");
+    presetLabel.className = "cd-options-label";
+    presetLabel.textContent = "プリセット";
+    const presetGroup = document.createElement("div");
+    presetGroup.className = "cd-options-preset-group";
+    for (const preset of SPAWN_PRESETS) {
+      const presetButton = document.createElement("button");
+      presetButton.type = "button";
+      presetButton.className = "cd-options-secondary";
+      presetButton.textContent = preset.label;
+      presetButton.addEventListener("click", () => {
+        this.settings.applySpawnPreset(preset);
+      });
+      presetGroup.appendChild(presetButton);
+      this.presetButtons.push(presetButton);
+    }
+    presetRow.append(presetLabel, presetGroup);
+
     // 出現間隔（auto モードのみ有効）
     const intervalRow = document.createElement("div");
     intervalRow.className = "cd-options-row";
@@ -234,7 +262,7 @@ export class OptionsPanel {
     });
     playLimitRow.append(playLimitLabel, playLimitSelect);
 
-    modeSection.append(modeRow, intervalRow, playLimitRow);
+    modeSection.append(modeRow, presetRow, intervalRow, playLimitRow);
 
     // --- 背景セクション ---
     const bgSection = document.createElement("section");
@@ -423,6 +451,7 @@ export class OptionsPanel {
     this.closeButton = closeButton;
     this.fullscreenButton = fullscreenButton;
     this.modeSelect = modeSelect;
+    this.presetRow = presetRow;
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
     this.intervalRow = intervalRow;
@@ -610,10 +639,16 @@ export class OptionsPanel {
       this.intervalInput.value = text;
     }
     this.intervalValue.textContent = formatIntervalMs(intervalMs);
-    // 出現間隔・遊びすぎ防止は auto モードのみ有効。manual では無効化して意味を明確にする。
+    // 出現間隔・出現プリセット・遊びすぎ防止は auto モードのみ有効。manual では無効化して意味を明確にする。
     const disabled = mode !== "auto";
     this.intervalInput.disabled = disabled;
     this.intervalRow.classList.toggle("cd-options-row-disabled", disabled);
+
+    // 出現プリセットも auto 専用。行の淡色化に加え各ボタンを disabled にして誤操作を防ぐ。
+    for (const button of this.presetButtons) {
+      button.disabled = disabled;
+    }
+    this.presetRow.classList.toggle("cd-options-row-disabled", disabled);
 
     const playLimitText = String(playLimitMinutes);
     if (this.playLimitSelect.value !== playLimitText) {
