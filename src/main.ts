@@ -2,7 +2,7 @@ import { Assets, type Texture } from "pixi.js";
 import { BackgroundController } from "./app/BackgroundController";
 import { CatDancerApp } from "./app/CatDancerApp";
 import { textureFromImageWithin } from "./app/imageTexture";
-import { PointerInput } from "./app/PointerInput";
+import { clientToWorld, PointerInput } from "./app/PointerInput";
 import { DEFAULT_WORLD_MARGIN, Scene } from "./app/Scene";
 import { AudioManager } from "./audio/AudioManager";
 import { MOUSE_SQUEAK_ID, registerCritterSounds } from "./audio/sounds";
@@ -218,6 +218,17 @@ async function bootstrap(): Promise<void> {
     currentMode.setPaused(panelOpen);
   };
 
+  // 捕獲フィードバック（auto 専用）: canvas のタップ/クリックで、当たった動くオブジェクトを
+  // 素早く逃がし（画面外へ→despawn）反応SEを鳴らす。auto かつパネルが閉じている時のみ有効
+  // （manual はネズミがカーソル追従なので対象外／パネル開時は backdrop が捕らえるが二重の保険）。
+  app.canvas.addEventListener("pointerdown", (event) => {
+    if (currentModeName !== "auto" || panelOpen) {
+      return;
+    }
+    const p = clientToWorld(app.canvas, app.viewport, event.clientX, event.clientY);
+    autoMode.handleTap(p.x, p.y);
+  });
+
   // 設定変更の反映（音量/背景 + モード/出現間隔 + カスタム画像クリッター）。前回値と比較して差分だけ反映する。
   let prevMode = settings.settings.mode;
   let prevInterval = settings.settings.autoSpawnIntervalMs;
@@ -295,6 +306,15 @@ async function bootstrap(): Promise<void> {
       },
       // 画面上の critter を全消去（isolated スクショ用）。
       clear: () => scene.despawnAll(),
+      // 画面上の全 critter の中心/サイズ/種別（捕獲タップの客観検証用: tap 位置決めと前後比較）。
+      positions: () =>
+        scene.critterList.map((c) => ({
+          typeId: c.state.typeId,
+          x: c.state.position.x,
+          y: c.state.position.y,
+          size: c.state.size,
+          speed: Math.hypot(c.state.velocity.x, c.state.velocity.y),
+        })),
       // マウス追従の客観計測用: ネズミ位置/速度・ポインタ(=追従目標)・距離を返す。
       manual: () => {
         const snap = manualMode.debugSnapshot();
@@ -317,6 +337,13 @@ async function bootstrap(): Promise<void> {
       dispatchPointer: (clientX: number, clientY: number) => {
         app.canvas.dispatchEvent(
           new PointerEvent("pointermove", { clientX, clientY, bubbles: true }),
+        );
+      },
+      // 捕獲タップの検証補助: canvas に実 pointerdown を dispatch し、配線ごと（guard 込み）で
+      // handleTap を通す（client 座標）。auto かつパネル閉のとき当たれば逃走＋反応SEが出る。
+      tap: (clientX: number, clientY: number) => {
+        app.canvas.dispatchEvent(
+          new PointerEvent("pointerdown", { clientX, clientY, bubbles: true }),
         );
       },
     };

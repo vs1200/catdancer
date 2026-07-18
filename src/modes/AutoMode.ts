@@ -3,6 +3,7 @@ import type { Scene } from "../app/Scene";
 import type { AudioSink } from "../audio/AudioManager";
 import { CritterAudioController } from "../audio/CritterAudioController";
 import { type CritterAudioState, driveForType, groupMaxSpeedByType } from "../audio/perTypeLevels";
+import { CATCH_ID } from "../audio/sounds";
 import type { Critter } from "../critters/Critter";
 import { spawnCritter } from "../critters/Critter";
 import { getCritterType } from "../critters/registry";
@@ -14,6 +15,16 @@ import { weightedIndex } from "./weightedChoice";
 
 /** 同時に存在できる critter 数の上限（頭打ち＝despawn とセットでリークを防ぐ）。 */
 const DEFAULT_MAX_ACTIVE = 12;
+
+/** タップ当たり判定の半径係数（critter の最大辺 size に対する比）。 */
+const HIT_RADIUS_FACTOR = 0.6;
+/** タップ当たり判定の最小半径(px)。小さい critter でも指先が当たる下限。 */
+const MIN_HIT_RADIUS = 28;
+
+/** critter の当たり半径(px)。size ベース＋指先が当たる下限。 */
+function hitRadius(size: number): number {
+  return Math.max(size * HIT_RADIUS_FACTOR, MIN_HIT_RADIUS);
+}
 
 /** AutoMode で出現させる種別 1 つぶんの設定。 */
 export interface AutoModeEntry {
@@ -226,6 +237,44 @@ export class AutoMode implements Mode {
       const drive = driveForType(maxByType, typeId);
       ctrl.update(drive.maxSpeed, dtSeconds, drive.present);
     }
+  }
+
+  /**
+   * 捕獲フィードバック: world 座標 (x,y) を全 critter とヒットテストし、当たった中で最も近い 1 体を
+   * その点から逃がし（{@link Critter.flee}）、反応SEを鳴らす。running かつ not paused の時のみ有効。
+   *
+   * - 当たり判定は各 critter 中心との距離が当たり半径（{@link hitRadius} = size ベース＋指先下限）以内か。
+   * - 反応SE: その種別に voice があれば voice（ネズミの squeak 等）、無ければ汎用キャッチSE（{@link CATCH_ID}）。
+   * - 逃げた critter は FleeMovement で world 外へ抜け、既存 despawn 経路で消える（新経路は作らない）。
+   *
+   * @returns いずれかの critter に当たれば true（空きスペースのタップは false ＝誤 despawn しない）。
+   */
+  handleTap(worldX: number, worldY: number): boolean {
+    if (!this.running || this.paused) {
+      return false;
+    }
+    const list = this.deps.scene.critterList;
+    let best: Critter | null = null;
+    let bestDistSq = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const dx = c.state.position.x - worldX;
+      const dy = c.state.position.y - worldY;
+      const distSq = dx * dx + dy * dy;
+      const radius = hitRadius(c.state.size);
+      if (distSq <= radius * radius && distSq < bestDistSq) {
+        best = c;
+        bestDistSq = distSq;
+      }
+    }
+    if (!best) {
+      return false;
+    }
+    best.flee(worldX, worldY);
+    // 反応SE: 種別に voice があればそれ、無ければ汎用キャッチSE。
+    const voice = getCritterType(best.state.typeId).sounds.voice;
+    this.deps.audio.playOneShot(voice ?? CATCH_ID);
+    return true;
   }
 
   /**

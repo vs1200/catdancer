@@ -20,6 +20,56 @@ export interface LoopVoice {
   stop(): void;
 }
 
+/**
+ * 「キャッチ」ワンショットSEを 1 発再生する（voice を持たない種別＝虫/猫じゃらし/おもちゃ/カスタムの
+ * 捕獲フィードバック用）。立ち上がりの帯域制限ノイズ・クリック（"tk"）＋速いピッチ下降のブリップ（"ポッ"）で、
+ * 猫がタップに反応した狩猟の手応えを短く出す。終了後に onended で全ノードを切断しリークさせない。
+ */
+export function playCatch(engine: AudioEngine): void {
+  const { context, output } = engine;
+  const t0 = context.currentTime;
+  const duration = 0.12;
+
+  // ピッチ下降のブリップ（"ポッ"）: 高→低へ速く落ちる短音。
+  const osc = context.createOscillator();
+  osc.type = "triangle";
+  const oscGain = context.createGain();
+  osc.connect(oscGain);
+  oscGain.connect(output);
+  osc.frequency.setValueAtTime(920, t0);
+  osc.frequency.exponentialRampToValueAtTime(220, t0 + duration);
+  oscGain.gain.setValueAtTime(0.0001, t0);
+  oscGain.gain.exponentialRampToValueAtTime(0.4, t0 + 0.01);
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+
+  // 立ち上がりのクリック（"tk"）: 極短の帯域制限ノイズ。
+  const noise = context.createBufferSource();
+  noise.buffer = createNoiseBuffer(context, 0.05);
+  const bandpass = context.createBiquadFilter();
+  bandpass.type = "bandpass";
+  bandpass.frequency.value = 2000;
+  bandpass.Q.value = 0.7;
+  const noiseGain = context.createGain();
+  noise.connect(bandpass);
+  bandpass.connect(noiseGain);
+  noiseGain.connect(output);
+  noiseGain.gain.setValueAtTime(0.3, t0);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.04);
+
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+  noise.start(t0);
+  noise.stop(t0 + 0.06);
+  // osc が最後に終わるので、その onended で全ノードをまとめて切断する。
+  osc.onended = (): void => {
+    osc.disconnect();
+    oscGain.disconnect();
+    noise.disconnect();
+    bandpass.disconnect();
+    noiseGain.disconnect();
+  };
+}
+
 /** ループ用の帯域制限ホワイトノイズを生成する（seconds 秒ぶんをループ）。 */
 function createNoiseBuffer(context: AudioContext, seconds: number): AudioBuffer {
   const length = Math.max(1, Math.floor(context.sampleRate * seconds));

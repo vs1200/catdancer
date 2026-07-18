@@ -1,5 +1,6 @@
 import type { Container as PixiContainer, Texture } from "pixi.js";
 import { Container, Sprite } from "pixi.js";
+import { FLEE_DEFAULT_SPEED, FleeMovement } from "../movement/FleeMovement";
 import type { Movement, MovementContext } from "../movement/Movement";
 import type { CritterState, Facing } from "./CritterState";
 import type { FaceMode, SwayConfig, TailConfig } from "./CritterType";
@@ -63,7 +64,8 @@ export class Critter {
   readonly state: CritterState;
   readonly view: Container;
   private readonly sprite: Sprite;
-  private readonly movement: Movement;
+  /** 現在の動き。捕獲フィードバック（{@link flee}）で FleeMovement へ差し替えられる。 */
+  private movement: Movement;
   /** テクスチャ実寸から baseSize(最大辺) に合わせる基準スケール。 */
   private readonly baseScale: number;
   /** 素材の既定向き（反転式で使用）。 */
@@ -166,6 +168,20 @@ export class Critter {
     }
 
     this.syncView();
+  }
+
+  /**
+   * 捕獲フィードバック: 動きを FleeMovement へ差し替え、指定点(from)から離れる向きへ高速で逃げる。
+   * 逃走方向は「critter 中心 - from」＝タップ点の逆方向。from が中心とほぼ一致する場合は
+   * FleeMovement が +x へフォールバックする（任意方向）。以降 update は FleeMovement が駆動し、
+   * world 外へ抜けて既存 despawn 経路で消える。
+   */
+  flee(fromWorldX: number, fromWorldY: number, speed: number = FLEE_DEFAULT_SPEED): void {
+    this.movement = new FleeMovement({
+      dirX: this.state.position.x - fromWorldX,
+      dirY: this.state.position.y - fromWorldY,
+      speed,
+    });
   }
 
   /**

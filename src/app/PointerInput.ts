@@ -7,6 +7,23 @@ export interface PointerState {
 }
 
 /**
+ * 画面(client CSS px)座標 → world 座標へ変換する（PointerInput と捕獲タップで共有する純ヘルパ）。
+ * getBoundingClientRect と現在の viewport の比で CSS 拡縮も補正するので、devicePixelRatio や
+ * resize に追従する。canvas は画面全体を覆う前提（index.html: #app/canvas とも 100vw/100vh）。
+ */
+export function clientToWorld(
+  canvas: HTMLCanvasElement,
+  viewport: Viewport,
+  clientX: number,
+  clientY: number,
+): Vec2 {
+  const rect = canvas.getBoundingClientRect();
+  const sx = rect.width > 0 ? viewport.width / rect.width : 1;
+  const sy = rect.height > 0 ? viewport.height / rect.height : 1;
+  return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
+}
+
+/**
  * canvas 上のポインタ（マウス/タッチ）を world 座標へ変換し {@link PointerState} を更新する配線。
  *
  * - `pointermove` / `pointerdown`（＝タッチのタップ/ドラッグ含む）→ 画面座標を world 座標へ変換して更新。
@@ -80,12 +97,8 @@ export class PointerInput {
     this.pointer.value = null;
   };
 
-  /** 画面(client CSS px)座標 → world 座標。rect と viewport の比で CSS 拡縮も補正する。 */
+  /** 画面(client CSS px)座標 → world 座標（共有ヘルパ {@link clientToWorld} に委譲）。 */
   private toWorld(clientX: number, clientY: number): Vec2 {
-    const rect = this.canvas.getBoundingClientRect();
-    const vp = this.getViewport();
-    const sx = rect.width > 0 ? vp.width / rect.width : 1;
-    const sy = rect.height > 0 ? vp.height / rect.height : 1;
-    return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
+    return clientToWorld(this.canvas, this.getViewport(), clientX, clientY);
   }
 }
