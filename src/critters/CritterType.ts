@@ -2,13 +2,13 @@ import type { Movement } from "../movement/Movement";
 import type { Facing } from "./CritterState";
 
 /**
- * オブジェクトに紐づく SE 識別子（プレースホルダ）。
- * 実際の解決は後続タスクの AudioManager が担う。
+ * オブジェクトに紐づく SE 識別子。値は AudioManager のバンクへ登録された SE id（audio/sounds.ts）。
+ * v2 でオブジェクト別 SE（鳥のさえずり/魚の水音等）を足す際もこの 2 スロットで表現できる。
  */
 export interface CritterSoundSet {
-  /** 待機時のループSE識別子。 */
-  idle?: string;
-  /** 移動時のSE識別子。 */
+  /** 断続的に鳴らすワンショットSE識別子（鳴き声。例: ネズミのチューチュー）。 */
+  voice?: string;
+  /** 移動速度に連動して鳴らすループSE識別子（走行音/羽音など）。 */
   move?: string;
 }
 

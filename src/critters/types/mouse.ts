@@ -1,3 +1,4 @@
+import { MOUSE_SCURRY_ID, MOUSE_SQUEAK_ID } from "../../audio/sounds";
 import { MouseFollowMovement } from "../../movement/MouseFollowMovement";
 import type { CritterType } from "../CritterType";
 import { registerCritterType } from "../registry";
@@ -22,7 +23,7 @@ export const mouseType: CritterType = {
   defaultFacing: 1,
   // v1 マウス操作モードの既定。ポインタへ慣性追従＋画面外バッファで出現/消失する。
   createMovement: () => new MouseFollowMovement(),
-  sounds: { idle: "mouse-chuchu", move: "mouse-run" },
+  sounds: { voice: MOUSE_SQUEAK_ID, move: MOUSE_SCURRY_ID },
   hasTail: true,
   tail: {
     attach: { x: 0.06, y: 0.83 },
