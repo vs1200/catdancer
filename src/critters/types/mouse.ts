@@ -9,12 +9,16 @@ export const MOUSE_TYPE_ID = "mouse";
 // Vite は base:"./" 環境。絶対 /assets ではなく BASE_URL 基点で解決する。
 const MOUSE_TEXTURE_URL = `${import.meta.env.BASE_URL}assets/critters/mouse-body.webp`;
 
+/** 尻尾テクスチャ（元 house-mouse から抽出した本物。左=根元(attach) / 右=先端）。共有ロードする。 */
+export const MOUSE_TAIL_TEXTURE_URL = `${import.meta.env.BASE_URL}assets/critters/mouse-tail.webp`;
+
 /**
  * ネズミ種別。元画像は右向き(defaultFacing=1)。本体幅 ~220px。
- * 尻尾は MeshRope で手続き生成（hasTail=true, tail 設定参照）。SE 識別子はプレースホルダ。
+ * 尻尾は本物テクスチャ(mouse-tail.webp)＋ワールド空間の物理トレイル（hasTail=true, tail 設定参照）。
+ * SE 識別子はプレースホルダ。
  *
- * tail: 付け根は本体後方下 (x≈0.06, y≈0.83)。各 *Factor は表示幅(=baseSize)に対する比率。
- * 尻尾は本体幅とほぼ同長で細く、先端が大きく揺れる。値はスクショで微調整済み。
+ * tail: 付け根は本体後方下 (x≈0.06, y≈0.83)。lengthFactor/widthScale は表示幅・テクスチャ比率に対する
+ * 係数。damping で尾の引き具合、constraintIterations で張り、gravity=0 で純トレイル（静止で止まる）。
  */
 export const mouseType: CritterType = {
   id: MOUSE_TYPE_ID,
@@ -45,14 +49,12 @@ export const mouseType: CritterType = {
   hasTail: true,
   tail: {
     attach: { x: 0.06, y: 0.83 },
-    lengthFactor: 0.95,
-    thicknessFactor: 0.075,
-    amplitudeFactor: 0.11,
-    sagFactor: 0.1,
-    pointCount: 20,
-    waveCount: 1.1,
-    speed: 6.0,
-    amplitudeExponent: 1.6,
+    lengthFactor: 0.9,
+    widthScale: 1.0,
+    pointCount: 18,
+    damping: 0.82,
+    constraintIterations: 16,
+    gravity: 0,
   },
 };
 

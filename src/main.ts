@@ -6,9 +6,8 @@ import { DEFAULT_WORLD_MARGIN, Scene } from "./app/Scene";
 import { AudioManager } from "./audio/AudioManager";
 import { MOUSE_SQUEAK_ID, registerCritterSounds } from "./audio/sounds";
 import { getCritterType, listCritterTypes } from "./critters/registry";
-import { createTailTexture } from "./critters/tail/tailTexture";
 import { FOXTAIL_TYPE_ID, registerFoxtailType } from "./critters/types/foxtail";
-import { MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
+import { MOUSE_TAIL_TEXTURE_URL, MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "./critters/types/toys";
 import { computeWorldMargin } from "./critters/worldMargin";
 import { AutoMode } from "./modes/AutoMode";
@@ -63,18 +62,18 @@ async function bootstrap(): Promise<void> {
   // 背景設定 → 描画の橋渡し。
   const backgroundController = new BackgroundController(scene.backgroundLayer);
 
-  // 共有テクスチャ: 各種別の本体をロード、尻尾は 1 度だけ手続き生成する。
+  // 共有テクスチャ: 各種別の本体と尻尾（mouse-tail.webp=本物）を 1 度だけロードする。
   // 全 critter で共有するため、AutoMode の多数 spawn でもテクスチャは増えない
   // （despawn 時は Sprite/MeshRope の geometry のみ破棄し、共有テクスチャは保持＝リークしない）。
   const mouseType = getCritterType(MOUSE_TYPE_ID);
   const foxtailType = getCritterType(FOXTAIL_TYPE_ID);
   const toysType = getCritterType(TOYS_TYPE_ID);
-  const [bodyTexture, foxtailTexture, toysTexture] = await Promise.all([
+  const [bodyTexture, foxtailTexture, toysTexture, tailTexture] = await Promise.all([
     Assets.load(mouseType.textureUrl),
     Assets.load(foxtailType.textureUrl),
     Assets.load(toysType.textureUrl),
+    Assets.load(MOUSE_TAIL_TEXTURE_URL),
   ]);
-  const tailTexture = createTailTexture();
 
   // ポインタ入力（ManualMode が attach/detach を占有管理する）。
   const pointerInput = new PointerInput(app.canvas, () => app.viewport);

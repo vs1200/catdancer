@@ -119,6 +119,8 @@ export class ManualMode implements Mode {
     viewRotation: number;
     /** view.scale.y。左半分(鏡像)で -1（上下逆さ回避の検証用）。 */
     viewScaleY: number;
+    /** 尻尾先端のワールド座標（静止/トレイル検証用）。尻尾が無ければ null。 */
+    tailTip: { x: number; y: number } | null;
   } | null {
     if (!this.critter) {
       return null;
@@ -133,6 +135,7 @@ export class ManualMode implements Mode {
       heading: this.critter.state.heading,
       viewRotation: this.critter.view.rotation,
       viewScaleY: this.critter.view.scale.y,
+      tailTip: this.critter.tailTip,
     };
   }
 }

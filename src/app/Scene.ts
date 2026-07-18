@@ -62,9 +62,16 @@ export class Scene {
     this.backgroundLayerValue.resize(viewport);
   }
 
-  /** critter を追加する（表示レイヤへ + アクティブ集合へ登録）。 */
+  /**
+   * critter を追加する（表示レイヤへ + アクティブ集合へ登録）。
+   * 尻尾（ワールド空間の MeshRope）は本体 view の背面になるよう先に addChild する。
+   */
   add(critter: Critter): void {
     this.active.push(critter);
+    const tail = critter.tailMesh;
+    if (tail) {
+      this.critters.addChild(tail);
+    }
     this.critters.addChild(critter.view);
   }
 
@@ -74,7 +81,7 @@ export class Scene {
     if (i >= 0) {
       this.active.splice(i, 1);
     }
-    this.critters.removeChild(critter.view);
+    this.removeFromLayer(critter);
     critter.destroy();
   }
 
@@ -82,7 +89,7 @@ export class Scene {
   despawnAll(): void {
     for (let i = 0; i < this.active.length; i++) {
       const c = this.active[i];
-      this.critters.removeChild(c.view);
+      this.removeFromLayer(c);
       c.destroy();
     }
     this.active.length = 0;
@@ -97,10 +104,19 @@ export class Scene {
       const c = this.active[i];
       if (pred(c)) {
         this.active.splice(i, 1);
-        this.critters.removeChild(c.view);
+        this.removeFromLayer(c);
         c.destroy();
       }
     }
+  }
+
+  /** critter の本体 view と尻尾 mesh を表示レイヤから外す（destroy 前の後始末）。 */
+  private removeFromLayer(critter: Critter): void {
+    const tail = critter.tailMesh;
+    if (tail) {
+      this.critters.removeChild(tail);
+    }
+    this.critters.removeChild(critter.view);
   }
 
   /** アクティブ全 critter を更新する（配列を作り直さず index 走査）。 */

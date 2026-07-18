@@ -1,4 +1,4 @@
-import type { Texture } from "pixi.js";
+import type { Container as PixiContainer, Texture } from "pixi.js";
 import { Container, Sprite } from "pixi.js";
 import type { Movement, MovementContext } from "../movement/Movement";
 import type { CritterState, Facing } from "./CritterState";
@@ -9,9 +9,7 @@ import type { CritterSpawnOptions } from "./registry";
 import { createCritterStateFromType, getCritterType } from "./registry";
 import type { RopeTail } from "./tail/RopeTail";
 import { createRopeTail } from "./tail/RopeTail";
-
-/** 尻尾の揺れ勢い(intensity)を 1 に飽和させる基準速度(px/秒)。 */
-const TAIL_INTENSITY_REF_SPEED = 220;
+import { computeTailAnchor } from "./tail/tailChain";
 
 /**
  * faceMode='rotate' の回頭パラメータ。
@@ -20,14 +18,22 @@ const TAIL_INTENSITY_REF_SPEED = 220;
  */
 const HEADING_UPDATE_OPTS: HeadingUpdateOptions = { holdMinSpeed: 6, smoothTime: 0.06 };
 
+/** 尻尾の頭ワールド座標と後方単位ベクトル（トレイル方向）。 */
+interface TailHead {
+  headX: number;
+  headY: number;
+  backX: number;
+  backY: number;
+}
+
 export interface CritterViewOptions {
   /** 素材の既定向き。反転式 scale.x = facing * defaultFacing に用いる。 */
   defaultFacing?: Facing;
-  /** 尻尾設定。あれば MeshRope 尻尾を本体後方に付ける。 */
+  /** 尻尾設定。あれば MeshRope 尻尾をワールド空間で本体後方にトレイルさせる。 */
   tail?: TailConfig;
   /**
-   * 尻尾テクスチャ（省略時は RopeTail が自前生成）。多数 spawn する AutoMode では
-   * 共有テクスチャを渡してテクスチャの都度生成/リークを避ける。
+   * 尻尾テクスチャ（省略時は白フォールバック）。多数 spawn する AutoMode でもテクスチャを共有し、
+   * 尻尾の都度生成/リークを避ける（共有テクスチャは despawn で破棄しない）。
    */
   tailTexture?: Texture;
   /** 回転 sway 設定。あれば pivot 周りに state.rotation を反映する（dangle 系）。 */
@@ -43,11 +49,15 @@ export interface CritterViewOptions {
 
 /**
  * CritterState(純) と PixiJS 表示(Container + Sprite + optional 尻尾)を結ぶ実体。
- * update() で Movement を適用し、state を表示へ同期する（位置・左右反転・尻尾アニメ）。
+ * update() で Movement を適用し、state を表示へ同期する（位置・左右反転/回転・尻尾トレイル）。
  *
- * 反転は Container の scale.x に集約する（尻尾など子要素を本体と一緒に反転させるため）:
- *   view.scale.x = facing * defaultFacing
- * facing===defaultFacing なら等倍、異なれば水平反転。sprite 自身は baseScale のまま。
+ * 反転/回転は Container(view) に集約する（sway など内側要素のため）:
+ *   flip: view.scale.x = facing * defaultFacing
+ *   rotate: view.rotation = heading, view.scale.y = 鏡像なら -1
+ *
+ * 尻尾（MeshRope）は本体 view の子ではなく、Scene の critters レイヤ（ワールド空間）へ別途置く。
+ * 頭(point0)だけを本体後方 attach のワールド座標に固定し、鎖はワールドでトレイルさせるため、
+ * 本体が回転しても尻尾は一緒に回らず「進行方向の逆へ遅れて流れる」自然な動きになる。
  */
 export class Critter {
   readonly state: CritterState;
@@ -62,12 +72,13 @@ export class Critter {
   private readonly flipWithFacing: boolean;
   /** 向きの表現方式（'flip'=水平反転 / 'rotate'=全方位回転）。 */
   private readonly faceMode: FaceMode;
-  /** 尻尾（無ければ null）。 */
+  /** 尻尾（無ければ null）。mesh はワールド空間（critters レイヤ）に置く。 */
   private readonly tail: RopeTail | null;
+  /** 尻尾 attach の本体ローカルオフセット(px, 変換前)。頭ワールド座標の算出に使う。 */
+  private readonly tailLocalX: number = 0;
+  private readonly tailLocalY: number = 0;
   /** 回転 sway 用の内側 Container（pivot を支点に回す。無ければ null）。 */
   private readonly swayContainer: Container | null;
-  /** 起動からの経過秒（尻尾アニメの位相に使用）。 */
-  private elapsedSeconds = 0;
 
   constructor(
     state: CritterState,
@@ -91,10 +102,17 @@ export class Critter {
     const displayWidth = texture.width * this.baseScale;
     const displayHeight = texture.height * this.baseScale;
 
-    // 尻尾は本体の後方に垂れるため sprite より背面に置く（addChild 順で奥→手前）。
+    // 尻尾: attach のローカルオフセットを控え、初期の頭ワールド座標で物理チェーンを起こす。
+    // mesh は view には足さない（Scene がワールド空間の critters レイヤへ本体の背面として置く）。
     if (options?.tail) {
-      this.tail = createRopeTail(options.tail, displayWidth, displayHeight, options.tailTexture);
-      this.view.addChild(this.tail.mesh);
+      this.tailLocalX = (options.tail.attach.x - 0.5) * displayWidth;
+      this.tailLocalY = (options.tail.attach.y - 0.5) * displayHeight;
+      this.tail = createRopeTail(
+        options.tail,
+        displayWidth,
+        this.computeTailHead(),
+        options.tailTexture,
+      );
     } else {
       this.tail = null;
     }
@@ -117,9 +135,18 @@ export class Critter {
     this.syncView();
   }
 
+  /** 尻尾 MeshRope（ワールド空間・本体背面に置く）。無ければ null。Scene が add/remove する。 */
+  get tailMesh(): PixiContainer | null {
+    return this.tail?.mesh ?? null;
+  }
+
+  /** 尻尾先端のワールド座標（静止検証・DEV フック用）。尻尾が無ければ null。 */
+  get tailTip(): { x: number; y: number } | null {
+    return this.tail?.tip ?? null;
+  }
+
   update(dtSeconds: number, ctx: MovementContext): void {
     this.movement.update(this.state, dtSeconds, ctx);
-    this.elapsedSeconds += dtSeconds;
 
     // rotate 系は速度ベクトルから heading を平滑更新（静止時は保持＝くるくる回らない）。
     if (this.faceMode === "rotate") {
@@ -132,19 +159,47 @@ export class Critter {
       );
     }
 
+    // 尻尾は最新の本体位置/向きから頭ワールド座標を求め、ワールド空間でトレイルさせる。
     if (this.tail) {
-      const speed = Math.hypot(this.state.velocity.x, this.state.velocity.y);
-      const intensity = Math.min(speed / TAIL_INTENSITY_REF_SPEED, 1);
-      this.tail.update(this.elapsedSeconds, intensity);
+      const head = this.computeTailHead();
+      this.tail.update(head.headX, head.headY, head.backX, head.backY, dtSeconds);
     }
 
     this.syncView();
   }
 
   /**
-   * state → 表示同期。位置反映と向きの反映を行う。
+   * 尻尾の頭（本体後方 attach）のワールド座標と後方トレイル方向を、本体 view と同じ変換で求める。
+   * - rotate: angle=heading・scaleX=defaultFacing・mirrorY=左半分。後方 = -heading 方向。
+   * - flip  : angle=0・scaleX=facing*defaultFacing（反転式）。後方 = -scaleX 方向（±x）。
+   */
+  private computeTailHead(): TailHead {
+    const { position } = this.state;
+    const rotate = this.faceMode === "rotate";
+    const angle = rotate ? this.state.heading : 0;
+    const mirrorY = rotate ? isMirroredHeading(angle) : false;
+    const scaleX = rotate
+      ? this.defaultFacing
+      : this.flipWithFacing
+        ? this.state.facing * this.defaultFacing
+        : this.defaultFacing;
+    const anchor = computeTailAnchor(
+      position.x,
+      position.y,
+      angle,
+      mirrorY,
+      scaleX,
+      this.tailLocalX,
+      this.tailLocalY,
+    );
+    const backX = rotate ? -Math.cos(angle) : -scaleX;
+    const backY = rotate ? -Math.sin(angle) : 0;
+    return { headX: anchor.x, headY: anchor.y, backX, backY };
+  }
+
+  /**
+   * state → 表示同期。位置反映と向きの反映を行う（尻尾はワールド空間で別途更新済み）。
    * - faceMode='rotate': view を heading へ回転し、左半分は鏡像反転(scale.y=-1)で上下を自然に保つ。
-   *   view ごと回すため子（尻尾 MeshRope）も付け根を保ったまま本体回転に追従する。
    *   右向きテクスチャ前提のため scale.x は反転せず defaultFacing(=1) のまま（heading が全方位を表現）。
    * - faceMode='flip'（既定）: 回転せず facing*defaultFacing で水平反転のみ。sway があれば
    *   pivot 周りの回転(state.rotation)を内側 Container に反映する。
@@ -168,14 +223,13 @@ export class Critter {
 
   /**
    * Critter を完全破棄する（リークなく解放）。
-   * - view.destroy({children:true}) で Sprite・MeshRope（geometry/shader）を破棄する。
-   *   texture 既定 false なので共有テクスチャ（本体/共有尻尾）は保持される。
-   * - 尻尾が自前生成テクスチャを持つ場合のみ releaseTexture で追加解放する
-   *   （mesh は上で破棄済みなので二重破棄しない）。
+   * - view.destroy({children:true}) で Sprite を破棄する。
+   * - 尻尾 mesh は view の子ではなくワールド空間に置くため、別途 tail.destroy() で MeshRope
+   *   （geometry/shader）を破棄する。共有テクスチャは破棄しない（mesh.destroy 既定 texture=false）。
    */
   destroy(): void {
     this.view.destroy({ children: true });
-    this.tail?.releaseTexture();
+    this.tail?.destroy();
   }
 }
 
@@ -185,7 +239,7 @@ export interface SpawnCritterParams {
   typeId: string;
   /** 本体テクスチャ（呼び出し側が Assets.load 済みのものを渡す。複数体で共有する）。 */
   bodyTexture: Texture;
-  /** 尻尾テクスチャ（省略時は自前生成）。多数 spawn では共有テクスチャを渡す。 */
+  /** 尻尾テクスチャ（省略時は白フォールバック）。多数 spawn では共有テクスチャを渡す。 */
   tailTexture?: Texture;
   /** Movement を差し替える（省略時は種別の既定 createMovement()）。 */
   movement?: Movement;

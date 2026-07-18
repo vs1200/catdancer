@@ -15,29 +15,26 @@ export interface CritterSoundSet {
 }
 
 /**
- * 尻尾(MeshRope)の種別ごとの設定。
- * attach は本体テクスチャの正規化座標(0..1, 左上原点)。各 *Factor は表示幅に対する比率で、
- * サイズ変更に追従できるようにしている。実 px 変換と点列生成は tail/RopeTail が担う。
+ * 尻尾(MeshRope)の種別ごとの設定（ワールド空間の物理トレイル）。
+ * attach は本体テクスチャの正規化座標(0..1, 左上原点)。lengthFactor/widthScale は表示幅・テクスチャ
+ * 比率に対する係数で、サイズ変更に追従できるようにしている。実 px 変換とチェーン物理は tail/RopeTail
+ * ＋ tail/tailChain（純ロジック）が担う。常時揺れ(sin)は廃止し、頭の移動からのみ動きが生まれる。
  */
 export interface TailConfig {
-  /** 付け根の付き位置（本体テクスチャ正規化座標, 0..1）。 */
+  /** 付け根の付き位置（本体テクスチャ正規化座標, 0..1）。頭(point0)のローカル基準。 */
   readonly attach: { readonly x: number; readonly y: number };
-  /** 尻尾全長 = lengthFactor * 表示幅。 */
+  /** 尻尾チェーンの全長（アーク長）= lengthFactor * 表示幅。 */
   readonly lengthFactor: number;
-  /** 付け根の太さ = thicknessFactor * 表示幅。 */
-  readonly thicknessFactor: number;
-  /** 先端の揺れ振幅 = amplitudeFactor * 表示幅。 */
-  readonly amplitudeFactor: number;
-  /** 静止時の垂れ = sagFactor * 表示幅。 */
-  readonly sagFactor: number;
+  /** リボン幅の倍率。実幅 = widthScale * (テクスチャ高/幅) * 全長（テクスチャの縦横比を保つ）。 */
+  readonly widthScale: number;
   /** 点数 N（MeshRope 分割数, 2 以上）。 */
   readonly pointCount: number;
-  /** 長さ方向の空間波数。 */
-  readonly waveCount: number;
-  /** 時間方向の角速度(rad/秒)。 */
-  readonly speed: number;
-  /** 振幅の先端方向への増大指数(>=1)。 */
-  readonly amplitudeExponent: number;
+  /** 慣性の保持率(0..1)。大きいほど尾を長く引く（静止までのフレーム数が増える）。 */
+  readonly damping: number;
+  /** 距離拘束（セグメント長固定）の緩和反復回数。大きいほど伸びにくい。 */
+  readonly constraintIterations: number;
+  /** 重力加速度(px/s^2, +y=画面下)。トップダウンのネズミは 0（純トレイル）。 */
+  readonly gravity: number;
 }
 
 /**

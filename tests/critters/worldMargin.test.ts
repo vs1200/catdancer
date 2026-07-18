@@ -26,9 +26,9 @@ describe("critterHideRadius", () => {
   it("尻尾ありは本体半径より大きい（尻尾先端まで隠せる）", () => {
     const r = critterHideRadius(mouseType);
     expect(r).toBeGreaterThan(mouseType.baseSize / 2);
-    // reachX=(0.5-0.06+0.95)*220=305.8, reachY=(0.33+0.1+0.11)*220=118.8, hypot≈328。
-    expect(r).toBeGreaterThan(320);
-    expect(r).toBeLessThan(335);
+    // ワールドトレイル: attachDist=hypot((0.06-0.5)*220,(0.83-0.5)*220)=121, +0.9*220=198 → 319。
+    expect(r).toBeGreaterThan(315);
+    expect(r).toBeLessThan(325);
   });
 
   it("sway系(回転揺れ)は本体半径より大きい（回した範囲を隠せる）", () => {
@@ -41,16 +41,16 @@ describe("critterHideRadius", () => {
 });
 
 describe("computeWorldMargin", () => {
-  it("ネズミ種別からは尻尾込みの margin(≈329)を返し、fallback より大きい", () => {
+  it("ネズミ種別からは尻尾込みの margin(=319)を返し、fallback より大きい", () => {
     const m = computeWorldMargin([mouseType], 220);
-    expect(m).toBe(329);
+    expect(m).toBe(319);
     expect(m).toBeGreaterThan(220);
   });
 
   it("複数種別では最大の hideRadius を採る", () => {
     const small = makeType({ id: "s", baseSize: 100, hasTail: false }); // 50
     const m = computeWorldMargin([small, mouseType], 220);
-    expect(m).toBe(329);
+    expect(m).toBe(319);
   });
 
   it("種別が無ければ fallback を返す", () => {

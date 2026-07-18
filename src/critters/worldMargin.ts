@@ -24,11 +24,10 @@ export function critterHideRadius(type: CritterType): number {
     return bodyRadius;
   }
   const w = type.baseSize;
-  // 中心→付け根(後方) + 尻尾全長 = 中心から尻尾先端までの水平距離。
-  const reachX = (0.5 - tail.attach.x + tail.lengthFactor) * w;
-  // 付け根の縦オフセット + 静止たるみ + 揺れ振幅 = 縦方向の到達。
-  const reachY = (Math.abs(tail.attach.y - 0.5) + tail.sagFactor + tail.amplitudeFactor) * w;
-  const tailRadius = Math.hypot(reachX, reachY);
+  // ワールド空間トレイル: 尻尾は attach からどの向きにも全長ぶん伸びうる。
+  // 中心→attach の距離 + 尻尾全長 = 中心から尻尾先端までの最大到達距離（縦は w で安全側に見積る）。
+  const attachDist = Math.hypot((tail.attach.x - 0.5) * w, (tail.attach.y - 0.5) * w);
+  const tailRadius = attachDist + tail.lengthFactor * w;
   return Math.max(bodyRadius, tailRadius);
 }
 
