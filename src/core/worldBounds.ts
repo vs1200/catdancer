@@ -45,6 +45,14 @@ export function isInsideWorld(bounds: WorldBounds, p: Vec2): boolean {
 }
 
 /**
+ * 点が world 領域の外か（= 完全に画面外へ抜けた）。despawn 判定の述語（純関数）。
+ * critter は中心座標で管理し margin は全パーツを隠せる幅なので、中心が world 外＝完全に不可視。
+ */
+export function isOutsideWorld(bounds: WorldBounds, p: Vec2): boolean {
+  return !isInsideWorld(bounds, p);
+}
+
+/**
  * 点が「画面内 / 画面外(world内) / world外」のどれかを判定する。
  */
 export function classifyPoint(bounds: WorldBounds, p: Vec2): PointRegion {

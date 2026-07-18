@@ -1,6 +1,13 @@
 import { pruneImagesExcept, putImage } from "./imageStore";
-import type { AppSettings, BackgroundType } from "./settingsData";
-import { clampVolume, normalizeHexColor, parseSettings, serializeSettings } from "./settingsData";
+import type { AppMode, AppSettings, BackgroundType } from "./settingsData";
+import {
+  clampSpawnInterval,
+  clampVolume,
+  normalizeHexColor,
+  normalizeMode,
+  parseSettings,
+  serializeSettings,
+} from "./settingsData";
 
 /**
  * アプリ設定を保持・購読・永続化するストア。
@@ -36,6 +43,8 @@ export class SettingsStore {
     return {
       background: { ...this.state.background },
       masterVolume: this.state.masterVolume,
+      mode: this.state.mode,
+      autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
     };
   }
 
@@ -99,6 +108,18 @@ export class SettingsStore {
   /** master 音量を設定する（[0,1] にクランプして永続化＋通知）。 */
   setMasterVolume(value: number): void {
     this.state.masterVolume = clampVolume(value);
+    this.commit();
+  }
+
+  /** 表示モードを設定する（manual/auto。不正値は manual へ正規化）。 */
+  setMode(mode: AppMode): void {
+    this.state.mode = normalizeMode(mode);
+    this.commit();
+  }
+
+  /** auto モードの出現間隔(ms)を設定する（範囲外はクランプして永続化＋通知）。 */
+  setAutoSpawnInterval(ms: number): void {
+    this.state.autoSpawnIntervalMs = clampSpawnInterval(ms);
     this.commit();
   }
 

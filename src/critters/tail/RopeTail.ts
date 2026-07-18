@@ -33,13 +33,19 @@ export class RopeTail {
   readonly mesh: MeshRope;
   private readonly baseParams: TailParams;
   private readonly points: Point[];
+  private readonly texture: Texture;
+  /** テクスチャを自前生成したか（＝破棄責任を持つか）。共有テクスチャ渡しなら false。 */
+  private readonly ownsTexture: boolean;
 
   constructor(options: RopeTailOptions) {
     this.baseParams = options.params;
-    const texture = options.texture ?? createTailTexture();
+    // 共有テクスチャを渡されたらそれを使い破棄しない。省略時のみ自前生成し破棄責任を持つ
+    // （AutoMode の多数 spawn では共有テクスチャを渡してテクスチャの都度生成/リークを避ける）。
+    this.ownsTexture = options.texture === undefined;
+    this.texture = options.texture ?? createTailTexture();
     const initial = computeTailPoints(this.baseParams, 0);
     this.points = initial.map((p) => new Point(p.x, p.y));
-    this.mesh = new MeshRope({ texture, points: this.points, width: options.width });
+    this.mesh = new MeshRope({ texture: this.texture, points: this.points, width: options.width });
     this.mesh.position.set(options.attach.x, options.attach.y);
   }
 
@@ -62,8 +68,21 @@ export class RopeTail {
     }
   }
 
+  /** 単体破棄: MeshRope（geometry）を破棄し、自前生成テクスチャなら解放する。 */
   destroy(): void {
     this.mesh.destroy();
+    this.releaseTexture();
+  }
+
+  /**
+   * 自前生成テクスチャのみを解放する（共有テクスチャは解放しない）。
+   * mesh を親 Container 側でまとめて破棄する場合に、テクスチャの取りこぼしを防ぐため使う
+   * （mesh の二重破棄を避けつつ、生成テクスチャのリークだけを塞ぐ）。
+   */
+  releaseTexture(): void {
+    if (this.ownsTexture) {
+      this.texture.destroy(true);
+    }
   }
 }
 
@@ -76,6 +95,7 @@ export function createRopeTail(
   config: TailConfig,
   displayWidth: number,
   displayHeight: number,
+  texture?: Texture,
 ): RopeTail {
   const attach: Vec2 = {
     x: (config.attach.x - 0.5) * displayWidth,
@@ -95,5 +115,6 @@ export function createRopeTail(
     params,
     width: config.thicknessFactor * displayWidth,
     attach,
+    texture,
   });
 }

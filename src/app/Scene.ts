@@ -2,6 +2,7 @@ import { Container } from "pixi.js";
 import type { Viewport, WorldBounds } from "../core/worldBounds";
 import { createWorldBounds } from "../core/worldBounds";
 import type { Critter } from "../critters/Critter";
+import type { MovementContext } from "../movement/Movement";
 import { BackgroundLayer } from "./BackgroundLayer";
 
 /**
@@ -27,6 +28,11 @@ export class Scene {
   readonly critters: Container;
   private readonly backgroundLayerValue: BackgroundLayer;
   private worldBoundsValue: WorldBounds;
+  /**
+   * アクティブな critter 集合（表示レイヤと並行して保持）。
+   * spawn/despawn の単一の真実源。毎フレーム更新はこの配列を作り直さずに走査する。
+   */
+  private readonly active: Critter[] = [];
 
   constructor(viewport: Viewport, margin: number = DEFAULT_WORLD_MARGIN) {
     this.root = new Container();
@@ -56,11 +62,61 @@ export class Scene {
     this.backgroundLayerValue.resize(viewport);
   }
 
+  /** critter を追加する（表示レイヤへ + アクティブ集合へ登録）。 */
   add(critter: Critter): void {
+    this.active.push(critter);
     this.critters.addChild(critter.view);
   }
 
-  remove(critter: Critter): void {
+  /** 指定 critter を despawn する（アクティブ集合/表示レイヤから外し、完全破棄）。 */
+  despawn(critter: Critter): void {
+    const i = this.active.indexOf(critter);
+    if (i >= 0) {
+      this.active.splice(i, 1);
+    }
     this.critters.removeChild(critter.view);
+    critter.destroy();
+  }
+
+  /** 全 critter を despawn する（モード切替時の後始末）。 */
+  despawnAll(): void {
+    for (let i = 0; i < this.active.length; i++) {
+      const c = this.active[i];
+      this.critters.removeChild(c.view);
+      c.destroy();
+    }
+    this.active.length = 0;
+  }
+
+  /**
+   * 述語に一致する critter を despawn する（後方走査で in-place 除去＝配列を作り直さない）。
+   * pred は呼び出し側で 1 度だけ束縛したもの（毎フレームの new を避ける）を渡すこと。
+   */
+  despawnWhere(pred: (critter: Critter) => boolean): void {
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const c = this.active[i];
+      if (pred(c)) {
+        this.active.splice(i, 1);
+        this.critters.removeChild(c.view);
+        c.destroy();
+      }
+    }
+  }
+
+  /** アクティブ全 critter を更新する（配列を作り直さず index 走査）。 */
+  updateAll(dtSeconds: number, ctx: MovementContext): void {
+    for (let i = 0; i < this.active.length; i++) {
+      this.active[i].update(dtSeconds, ctx);
+    }
+  }
+
+  /** 現在のアクティブ critter 数（DEV フック・リーク検証で観測する）。 */
+  get critterCount(): number {
+    return this.active.length;
+  }
+
+  /** アクティブ critter の読み取り専用ビュー（走査用。改変しないこと）。 */
+  get critterList(): readonly Critter[] {
+    return this.active;
   }
 }

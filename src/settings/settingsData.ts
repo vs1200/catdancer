@@ -9,6 +9,9 @@
 /** 背景の種類。単色 or ユーザー画像。 */
 export type BackgroundType = "color" | "image";
 
+/** 表示モード。manual=マウス操作（1体を追従）/ auto=猫用動画（自動で出現・横切り）。 */
+export type AppMode = "manual" | "auto";
+
 /** 背景設定。type=image のとき imageId が IndexedDB のキーを指す。 */
 export interface BackgroundSettings {
   type: BackgroundType;
@@ -23,12 +26,24 @@ export interface AppSettings {
   background: BackgroundSettings;
   /** master 音量(0..1)。 */
   masterVolume: number;
+  /** 表示モード（manual=マウス操作 / auto=猫用動画）。 */
+  mode: AppMode;
+  /** auto モードのオブジェクト出現間隔(ms)。 */
+  autoSpawnIntervalMs: number;
 }
 
 /** 既定の背景色（単色 白）。 */
 export const DEFAULT_BACKGROUND_COLOR = "#ffffff";
 /** 既定の master 音量。 */
 export const DEFAULT_MASTER_VOLUME = 0.5;
+/** 既定の表示モード。 */
+export const DEFAULT_MODE: AppMode = "manual";
+/** auto モードの既定出現間隔(ms)。 */
+export const DEFAULT_AUTO_SPAWN_INTERVAL_MS = 1500;
+/** 出現間隔の下限(ms)。極小値による spawn 暴走を UI/設定段で防ぐ。 */
+export const MIN_AUTO_SPAWN_INTERVAL_MS = 200;
+/** 出現間隔の上限(ms)。 */
+export const MAX_AUTO_SPAWN_INTERVAL_MS = 8000;
 
 /** `#rgb` / `#rrggbb`（大小文字可）を受理する正規表現。 */
 const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -64,6 +79,26 @@ export function clampVolume(value: unknown): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 
+/** 表示モードを正規化する。"auto" のみ auto、その他は既定(manual)。 */
+export function normalizeMode(value: unknown): AppMode {
+  return value === "auto" ? "auto" : "manual";
+}
+
+/**
+ * 出現間隔(ms)を [MIN,MAX] にクランプする。数値化できない/非有限は既定へフォールバック。
+ */
+export function clampSpawnInterval(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) {
+    return DEFAULT_AUTO_SPAWN_INTERVAL_MS;
+  }
+  return n < MIN_AUTO_SPAWN_INTERVAL_MS
+    ? MIN_AUTO_SPAWN_INTERVAL_MS
+    : n > MAX_AUTO_SPAWN_INTERVAL_MS
+      ? MAX_AUTO_SPAWN_INTERVAL_MS
+      : n;
+}
+
 /** デフォルト設定を新規生成する（呼び出しごとに独立したオブジェクト）。 */
 export function createDefaultSettings(): AppSettings {
   return {
@@ -73,6 +108,8 @@ export function createDefaultSettings(): AppSettings {
       imageId: null,
     },
     masterVolume: DEFAULT_MASTER_VOLUME,
+    mode: DEFAULT_MODE,
+    autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   };
 }
 
@@ -84,6 +121,8 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
     imageId: null,
   }),
   masterVolume: DEFAULT_MASTER_VOLUME,
+  mode: DEFAULT_MODE,
+  autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
 }) as AppSettings;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -105,6 +144,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
   return {
     background: { type, color, imageId },
     masterVolume: clampVolume(obj.masterVolume),
+    mode: normalizeMode(obj.mode),
+    autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
   };
 }
 
@@ -117,6 +158,8 @@ export function serializeSettings(settings: AppSettings): string {
       imageId: settings.background.imageId,
     },
     masterVolume: settings.masterVolume,
+    mode: settings.mode,
+    autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
   };
   return JSON.stringify(plain);
 }

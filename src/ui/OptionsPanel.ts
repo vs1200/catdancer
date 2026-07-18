@@ -1,23 +1,25 @@
 import type { AudioManager } from "../audio/AudioManager";
 import type { SettingsStore } from "../settings/SettingsStore";
-import type { AppSettings, BackgroundSettings } from "../settings/settingsData";
+import type { AppMode, AppSettings, BackgroundSettings } from "../settings/settingsData";
+import { MAX_AUTO_SPAWN_INTERVAL_MS, MIN_AUTO_SPAWN_INTERVAL_MS } from "../settings/settingsData";
 import { ensureOptionsStyles } from "./optionsStyles";
 import { sliderToVolume, volumeToSlider } from "./volumeScale";
 
 /**
- * 設定パネル（DOM オーバーレイ）。右下ボタンから開閉し、背景（色/画像）と音量を設定する。
+ * 設定パネル（DOM オーバーレイ）。右下ボタンから開閉し、モード（マウス操作/猫用動画）・
+ * 出現間隔・背景（色/画像）・音量を設定する。
  *
  * 責務:
- * - コントロール（color / file / range / reset）→ SettingsStore の公開 API を呼ぶ。
- *   音量は settings.setMasterVolume 経由で AudioManager にも適用・永続化される（実配線は main.ts）。
- * - 現在値の反映と外部変更への追従: settings.subscribe でコントロールを同期する。
+ * - コントロール（select / range / color / file / reset）→ SettingsStore の公開 API を呼ぶ。
+ *   音量は settings.setMasterVolume、モードは setMode、出現間隔は setAutoSpawnInterval 経由で
+ *   永続化され、main.ts の購読が AudioManager / モード切替へ実配線する。
+ * - 現在値の反映と外部変更への追従: settings.subscribe でコントロールを同期する
+ *   （出現間隔は auto モードのみ有効化）。
  * - 閉じる導線を 3 系統用意: ×ボタン / Esc / パネル外（透明バックドロップ）クリック。
- * - 開閉は onOpenChange で通知（main.ts が PointerInput の detach/attach 等に使う）。
+ * - 開閉は onOpenChange で通知（main.ts が現行モードの一時停止等に使う）。
  *
  * イベント分離: バックドロップ（透明）は背後の描画を遮らず、猫は開いている間もアニメを見られる。
  * カード上の pointerdown は stopPropagation してバックドロップの外側クリック判定に漏らさない。
- *
- * 拡張余地(v2): body の先頭に「モード」セクションを差し込めば、同じ枠でモード切替を追加できる。
  */
 
 export interface OptionsPanelOptions {
@@ -38,6 +40,10 @@ export class OptionsPanel {
   private onOpenChange?: (open: boolean) => void;
 
   private readonly closeButton: HTMLButtonElement;
+  private readonly modeSelect: HTMLSelectElement;
+  private readonly intervalInput: HTMLInputElement;
+  private readonly intervalValue: HTMLSpanElement;
+  private readonly intervalRow: HTMLDivElement;
   private readonly colorInput: HTMLInputElement;
   private readonly fileInput: HTMLInputElement;
   private readonly volumeInput: HTMLInputElement;
@@ -81,6 +87,56 @@ export class OptionsPanel {
     closeButton.textContent = "×";
     closeButton.addEventListener("click", () => this.close());
     header.append(title, closeButton);
+
+    // --- モードセクション ---
+    const modeSection = document.createElement("section");
+    modeSection.className = "cd-options-section";
+    const modeTitle = document.createElement("h3");
+    modeTitle.className = "cd-options-section-title";
+    modeTitle.textContent = "モード";
+    modeSection.appendChild(modeTitle);
+
+    // モード切替（マウス操作 / 猫用動画）
+    const modeRow = document.createElement("div");
+    modeRow.className = "cd-options-row";
+    const modeLabel = document.createElement("label");
+    modeLabel.className = "cd-options-label";
+    modeLabel.textContent = "モード";
+    modeLabel.htmlFor = "cd-mode-select";
+    const modeSelect = document.createElement("select");
+    modeSelect.id = "cd-mode-select";
+    modeSelect.className = "cd-options-select";
+    const manualOption = document.createElement("option");
+    manualOption.value = "manual";
+    manualOption.textContent = "マウス操作";
+    const autoOption = document.createElement("option");
+    autoOption.value = "auto";
+    autoOption.textContent = "猫用動画";
+    modeSelect.append(manualOption, autoOption);
+    modeSelect.addEventListener("change", () => {
+      this.settings.setMode(modeSelect.value === "auto" ? "auto" : "manual");
+    });
+    modeRow.append(modeLabel, modeSelect);
+
+    // 出現間隔（auto モードのみ有効）
+    const intervalRow = document.createElement("div");
+    intervalRow.className = "cd-options-row";
+    const intervalLabel = document.createElement("label");
+    intervalLabel.className = "cd-options-label";
+    intervalLabel.textContent = "出現間隔";
+    intervalLabel.htmlFor = "cd-interval-input";
+    const intervalInput = document.createElement("input");
+    intervalInput.type = "range";
+    intervalInput.id = "cd-interval-input";
+    intervalInput.min = String(MIN_AUTO_SPAWN_INTERVAL_MS);
+    intervalInput.max = String(MAX_AUTO_SPAWN_INTERVAL_MS);
+    intervalInput.step = "100";
+    const intervalValue = document.createElement("span");
+    intervalValue.className = "cd-volume-value";
+    intervalInput.addEventListener("input", () => this.onIntervalInput());
+    intervalRow.append(intervalLabel, intervalInput, intervalValue);
+
+    modeSection.append(modeRow, intervalRow);
 
     // --- 背景セクション ---
     const bgSection = document.createElement("section");
@@ -163,11 +219,15 @@ export class OptionsPanel {
     volRow.append(volLabel, volumeInput, volumeValue);
     volSection.append(volTitle, volRow);
 
-    card.append(header, bgSection, volSection);
+    card.append(header, modeSection, bgSection, volSection);
     overlay.appendChild(card);
 
     this.element = overlay;
     this.closeButton = closeButton;
+    this.modeSelect = modeSelect;
+    this.intervalInput = intervalInput;
+    this.intervalValue = intervalValue;
+    this.intervalRow = intervalRow;
     this.colorInput = colorInput;
     this.fileInput = fileInput;
     this.volumeInput = volumeInput;
@@ -264,10 +324,32 @@ export class OptionsPanel {
     this.settings.setMasterVolume(volume);
   }
 
+  private onIntervalInput(): void {
+    const ms = Number(this.intervalInput.value);
+    this.intervalValue.textContent = formatIntervalMs(ms);
+    this.settings.setAutoSpawnInterval(ms);
+  }
+
   /** 現在の設定値をコントロールへ反映する（起動時・外部変更・開いた時に呼ぶ）。 */
   private syncFromSettings(settings: AppSettings): void {
+    this.syncMode(settings.mode, settings.autoSpawnIntervalMs);
     this.syncBackground(settings.background);
     this.syncVolume();
+  }
+
+  private syncMode(mode: AppMode, intervalMs: number): void {
+    if (this.modeSelect.value !== mode) {
+      this.modeSelect.value = mode;
+    }
+    const text = String(intervalMs);
+    if (this.intervalInput.value !== text) {
+      this.intervalInput.value = text;
+    }
+    this.intervalValue.textContent = formatIntervalMs(intervalMs);
+    // 出現間隔は auto モードのみ有効。manual では無効化して意味を明確にする。
+    const disabled = mode !== "auto";
+    this.intervalInput.disabled = disabled;
+    this.intervalRow.classList.toggle("cd-options-row-disabled", disabled);
   }
 
   private syncBackground(background: BackgroundSettings): void {
@@ -286,4 +368,9 @@ export class OptionsPanel {
     }
     this.volumeValue.textContent = text;
   }
+}
+
+/** 出現間隔(ms)を「x.x秒」表記にする（UI 表示用）。 */
+function formatIntervalMs(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}秒`;
 }

@@ -16,6 +16,11 @@ export interface CritterViewOptions {
   defaultFacing?: Facing;
   /** 尻尾設定。あれば MeshRope 尻尾を本体後方に付ける。 */
   tail?: TailConfig;
+  /**
+   * 尻尾テクスチャ（省略時は RopeTail が自前生成）。多数 spawn する AutoMode では
+   * 共有テクスチャを渡してテクスチャの都度生成/リークを避ける。
+   */
+  tailTexture?: Texture;
 }
 
 /**
@@ -62,7 +67,7 @@ export class Critter {
     if (options?.tail) {
       const displayWidth = texture.width * this.baseScale;
       const displayHeight = texture.height * this.baseScale;
-      this.tail = createRopeTail(options.tail, displayWidth, displayHeight);
+      this.tail = createRopeTail(options.tail, displayWidth, displayHeight, options.tailTexture);
       this.view.addChild(this.tail.mesh);
     } else {
       this.tail = null;
@@ -91,25 +96,47 @@ export class Critter {
     this.view.scale.x = this.state.facing * this.defaultFacing;
   }
 
+  /**
+   * Critter を完全破棄する（リークなく解放）。
+   * - view.destroy({children:true}) で Sprite・MeshRope（geometry/shader）を破棄する。
+   *   texture 既定 false なので共有テクスチャ（本体/共有尻尾）は保持される。
+   * - 尻尾が自前生成テクスチャを持つ場合のみ releaseTexture で追加解放する
+   *   （mesh は上で破棄済みなので二重破棄しない）。
+   */
   destroy(): void {
     this.view.destroy({ children: true });
+    this.tail?.releaseTexture();
   }
+}
+
+/** {@link spawnCritter} のパラメータ。 */
+export interface SpawnCritterParams {
+  /** 種別 id（レジストリ登録済み）。 */
+  typeId: string;
+  /** 本体テクスチャ（呼び出し側が Assets.load 済みのものを渡す。複数体で共有する）。 */
+  bodyTexture: Texture;
+  /** 尻尾テクスチャ（省略時は自前生成）。多数 spawn では共有テクスチャを渡す。 */
+  tailTexture?: Texture;
+  /** Movement を差し替える（省略時は種別の既定 createMovement()）。 */
+  movement?: Movement;
+  /** 初期 state（位置/速度/向き/サイズ）。 */
+  spawn?: CritterSpawnOptions;
 }
 
 /**
  * 種別 id から表示付き Critter を生成するファクトリ（PixiJS 依存）。
- * texture は呼び出し側が Assets.load 済みのものを渡す。
- * defaultFacing と尻尾設定は種別定義から表示層へ橋渡しする。
+ *
+ * Movement を差し替え可能にしてあるため、同じ種別を ManualMode（追従）と AutoMode（横断）で
+ * 使い回せる。将来オブジェクト種別を足す際は typeId を変えるだけでよい（拡張点）。
+ * defaultFacing・尻尾設定は種別定義から表示層へ橋渡しする。
  */
-export function createCritter(
-  id: string,
-  texture: Texture,
-  options?: CritterSpawnOptions,
-): Critter {
-  const type = getCritterType(id);
-  const state = createCritterStateFromType(id, options);
-  return new Critter(state, texture, type.createMovement(), {
+export function spawnCritter(params: SpawnCritterParams): Critter {
+  const type = getCritterType(params.typeId);
+  const state = createCritterStateFromType(params.typeId, params.spawn);
+  const movement = params.movement ?? type.createMovement();
+  return new Critter(state, params.bodyTexture, movement, {
     defaultFacing: type.defaultFacing,
     tail: type.hasTail ? type.tail : undefined,
+    tailTexture: params.tailTexture,
   });
 }

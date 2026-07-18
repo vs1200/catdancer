@@ -141,6 +141,31 @@ const CSS = `
   flex: 0 0 auto;
 }
 
+.cd-options-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 180px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e9ee;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cd-options-select:focus-visible {
+  outline: 2px solid #7cc4ff;
+  outline-offset: 1px;
+}
+
+/* 無効化した行（例: manual モード時の出現間隔）は淡色＋操作不可にする。 */
+.cd-options-row-disabled {
+  opacity: 0.45;
+}
+.cd-options-row-disabled input[type="range"] {
+  cursor: not-allowed;
+}
+
 .cd-options-panel input[type="color"] {
   width: 46px;
   height: 30px;
