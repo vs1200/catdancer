@@ -24,11 +24,20 @@ interface LoadedImage {
  */
 export class BackgroundController {
   private readonly layer: BackgroundLayer;
+  private readonly onImageDecodeFailed?: () => void;
   private current: LoadedImage | null = null;
   private token = 0;
 
-  constructor(layer: BackgroundLayer) {
+  /**
+   * @param layer 反映先の背景レイヤ。
+   * @param onImageDecodeFailed 画像デコードが**恒久的に失敗**したとき（Blob 取得には成功したが
+   *   壊れた/切り詰められた画像でデコード throw）に呼ばれるコールバック。呼び出し側は該当設定を
+   *   単色へリセットする想定（壊れた blob を指す設定が永続化され続けるのを防ぐ）。
+   *   Blob 取得自体が失敗した場合（getImage が null＝削除済み/IDB 一時エラー）は呼ばれない。
+   */
+  constructor(layer: BackgroundLayer, onImageDecodeFailed?: () => void) {
     this.layer = layer;
+    this.onImageDecodeFailed = onImageDecodeFailed;
   }
 
   /** 設定を描画へ反映する（画像ロードのため非同期）。 */
@@ -68,8 +77,13 @@ export class BackgroundController {
       loaded = await loadTextureFromBlob(blob);
     } catch {
       if (token === this.token) {
+        // Blob 取得には成功したがデコードに失敗した＝壊れた/切り詰められた画像（恒久エラー）。
+        // 単色へフォールバックしたうえで、壊れた blob を指す設定が永続化され続けないよう通知する。
+        // token !== this.token（後続 apply に追い越された古い要求）では新要求が処理するので呼ばない。
+        console.warn("背景画像のデコードに失敗しました。背景設定を単色へリセットします。");
         this.layer.clearImage();
         this.releaseCurrent();
+        this.onImageDecodeFailed?.();
       }
       return;
     }

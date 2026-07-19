@@ -105,7 +105,11 @@ async function bootstrap(): Promise<void> {
   app.onResize((viewport) => scene.resize(viewport));
 
   // 背景設定 → 描画の橋渡し。
-  const backgroundController = new BackgroundController(scene.backgroundLayer);
+  // デコード恒久失敗（壊れた blob）時は背景設定を単色へ戻し、壊れた設定が永続化され続けるのを防ぐ。
+  // clearBackgroundImage は imageId=null・type=color・IDB 全掃除。戻り値 Promise は void で捨てる。
+  const backgroundController = new BackgroundController(scene.backgroundLayer, () => {
+    void settings.clearBackgroundImage();
+  });
 
   // 捕獲成功の視覚演出（バースト）。scene.effects（critter より前面）へ短命リングを出す。
   // 捕獲SE と対になる視覚フィードバックで、狩りの報酬感を高める。
@@ -255,6 +259,15 @@ async function bootstrap(): Promise<void> {
       texture = textureFromImageWithin(image);
     } catch {
       URL.revokeObjectURL(url);
+      if (token === customCritterToken) {
+        // Blob 取得には成功したがデコードに失敗した＝壊れた/切り詰められた画像（恒久エラー）。
+        // クリッター無しへフォールバックしたうえで、壊れた設定が永続化され続けないよう単色相当（無）へ戻す。
+        // token !== customCritterToken（後続要求に追い越された古い要求）では新要求が処理するので clear しない。
+        console.warn(
+          "カスタムクリッター画像のデコードに失敗しました。クリッター設定をリセットします。",
+        );
+        void settings.clearCustomCritterImage();
+      }
       return;
     }
     if (token !== customCritterToken) {
