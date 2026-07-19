@@ -4,6 +4,7 @@ import {
   type DangleSpawnRange,
   planDangleSpawn,
 } from "../../movement/DangleMovement";
+import type { WiggleConfig } from "../../movement/wiggle";
 import type { CritterSoundSet, CritterType, SwayConfig } from "../CritterType";
 
 /**
@@ -24,6 +25,8 @@ export interface DangleTypeConfig {
   range: DangleSpawnRange;
   /** SE セット（当面は空＝AutoMode 側の共有SEを流用）。 */
   sounds?: CritterSoundSet;
+  /** [UR3-6] マウス操作モードのクリックで起こす一時的なフリフリ設定（省略時はフリフリしない）。 */
+  clickWiggle?: WiggleConfig;
 }
 
 /**
@@ -74,5 +77,7 @@ export function makeDangleType(config: DangleTypeConfig): CritterType {
     sway: { pivot: config.pivot },
     // dangle 系は回転 sway が主。進行方向での水平反転は強制しない。
     flipWithFacing: false,
+    // クリックのフリフリは種別が明示したものだけ有効（foxtail 等は undefined＝無効）。
+    clickWiggle: config.clickWiggle,
   };
 }

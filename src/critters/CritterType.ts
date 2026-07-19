@@ -2,6 +2,7 @@ import type { ScurryLevelOptions } from "../audio/audioMath";
 import type { Vec2 } from "../core/vec2";
 import type { WorldBounds } from "../core/worldBounds";
 import type { Movement } from "../movement/Movement";
+import type { WiggleConfig } from "../movement/wiggle";
 import type { Facing } from "./CritterState";
 
 /**
@@ -114,4 +115,11 @@ export interface CritterType {
    * rng は [0,1) を返す関数（テスト差し替え可能）。未定義の種別は AutoMode の対象にしない。
    */
   readonly createAutoSpawn?: (world: WorldBounds, rng: () => number) => AutoSpawnPlan;
+  /**
+   * [UR3-6] マウス操作モードのクリック/タップで起こす一時的な回転 sway（フリフリ）設定。
+   * カーソル追従を止めずに sway を重ねる（おもちゃ）。省略時はクリックでフリフリしない
+   * （mouse=鳴き声のみ / foxtail・insect=固有コントローラで無関係）。種別ごとのクリック挙動を
+   * typeId 直書きの分岐でなくデータで表現するための軽い構造化（後続 RF-S1 で InteractionPolicy 化予定）。
+   */
+  readonly clickWiggle?: WiggleConfig;
 }

@@ -9,6 +9,8 @@ import { spawnCritter } from "../../critters/Critter";
 import { getCritterType } from "../../critters/registry";
 import { MouseFollowMovement } from "../../movement/MouseFollowMovement";
 import type { MovementContext } from "../../movement/Movement";
+import type { WiggleConfig } from "../../movement/wiggle";
+import { wiggleAngleAt } from "../../movement/wiggle";
 import type { ManualController, ManualControllerSnapshot } from "./ManualController";
 
 /** {@link FollowManualController} の構築パラメータ（種別ごとに差し替える）。 */
@@ -34,28 +36,41 @@ export interface FollowManualControllerDeps {
  * 走行音写像はポインタ追従のピーク速度に合わせた SCURRY_LEVEL_MOUSE_FOLLOW を用いる（sounds が空の
  * foxtail/toys は無音）。
  *
- * onPointerDown は種別に voice(鳴き声)SEがあれば鳴らす（mouse→squeak。UR-3 のクリック鳴きをここへ移設）。
- * voice を持たない種別（foxtail/insect/toys）は無音。worldX/worldY は本コントローラでは未使用だが、
+ * [UR3-6] onPointerDown は種別ごとのクリック挙動を担う（typeId 直書きでなく種別データで分岐）:
+ *  - voice(鳴き声)SE があれば鳴らす（mouse→squeak。UR-3 のクリック鳴きをここへ移設）。
+ *  - clickWiggle を持つ種別（おもちゃ）は、カーソル追従を止めずに一時的な回転 sway（フリフリ）を
+ *    重ねる（動画モードの dangle sway と体感を揃え、短時間で減衰）。
+ * どちらも持たない種別（foxtail/insect）は無音・無反応。worldX/worldY は本コントローラでは未使用だが、
  * UR-6 の虫クリック出現がこの引数で spawn 位置を決める拡張点になる。
  */
 export class FollowManualController implements ManualController {
   private readonly deps: FollowManualControllerDeps;
   private readonly ctx: MovementContext;
   private readonly audioCtrl: CritterAudioController;
+  /** [UR3-6] クリックでのフリフリ設定（種別が持てば非 null＝おもちゃ）。無い種別はフリフリしない。 */
+  private readonly clickWiggle: WiggleConfig | null;
   private critter: Critter | null = null;
   private running = false;
   private paused = false;
+  /**
+   * [UR3-6] 進行中のフリフリ（クリックで開始・時間経過で減衰し終了で null）。elapsed は経過秒。
+   * MouseFollowMovement は state.rotation を触らないため、これを追従の上へオーバーレイできる。
+   */
+  private wiggle: { elapsed: number } | null = null;
 
   constructor(deps: FollowManualControllerDeps) {
     this.deps = deps;
     // speedScale=1 で明示初期化（省略時1扱いだが意図を明確化）。update は world/pointer のみ
     // 上書きし speedScale は触らないため、mutate 再利用の ctx に設定は持続する。
     this.ctx = { world: deps.scene.worldBounds, pointer: null, speedScale: 1 };
+    const type = getCritterType(deps.typeId);
     // ポインタ追従はピーク速度が大きい(~6480)ため、走行音写像は上方調整版で抑揚を残す。
     // sounds は種別定義から解決（mouse=チュー+走行 / foxtail・toys=空で無音 / insect=羽音）。
-    this.audioCtrl = new CritterAudioController(deps.audio, getCritterType(deps.typeId).sounds, {
+    this.audioCtrl = new CritterAudioController(deps.audio, type.sounds, {
       scurry: SCURRY_LEVEL_MOUSE_FOLLOW,
     });
+    // クリック挙動は種別データで決める（おもちゃ=フリフリ / mouse=鳴き声のみ＝undefined）。
+    this.clickWiggle = type.clickWiggle ?? null;
   }
 
   start(): void {
@@ -86,6 +101,7 @@ export class FollowManualController implements ManualController {
       return;
     }
     this.running = false;
+    this.wiggle = null;
     this.deps.pointer.detach();
     this.audioCtrl.stop();
     if (this.critter) {
@@ -133,6 +149,19 @@ export class FollowManualController implements ManualController {
     }
     this.ctx.world = this.deps.scene.worldBounds;
     this.ctx.pointer = this.deps.pointer.pointer.value;
+    // [UR3-6] クリックのフリフリ（回転 sway オーバーレイ）を追従の上へ重ねる。MouseFollowMovement は
+    // state.rotation を触らないため、critter.update(=movement→syncView) の前に rotation を設定すれば
+    // 同フレームの syncView が pivot 周りの回転として反映する（追従＝位置/速度はそのまま継続）。
+    // フリフリの時計は実 dt で進める（追従の speedScale とは独立のクリック演出）。
+    if (this.wiggle && this.clickWiggle) {
+      this.wiggle.elapsed += dtSeconds;
+      if (this.wiggle.elapsed >= this.clickWiggle.durationSec) {
+        this.wiggle = null;
+        this.critter.state.rotation = 0;
+      } else {
+        this.critter.state.rotation = wiggleAngleAt(this.clickWiggle, this.wiggle.elapsed);
+      }
+    }
     this.critter.update(dtSeconds, this.ctx);
     const speed = Math.hypot(this.critter.state.velocity.x, this.critter.state.velocity.y);
     // 1 体で常に存在するため present=true 固定。
@@ -140,14 +169,20 @@ export class FollowManualController implements ManualController {
   }
 
   /**
-   * クリック/タップ（world 座標）。種別に voice(鳴き声)SEがあれば即時発火する（mouse→squeak）。
-   * pointerdown は信頼済みユーザージェスチャなので AudioContext の resume 契機にもなる。
-   * voice を持たない種別（foxtail/insect/toys）は無音。worldX/worldY は UR-6 の受け皿（現状未使用）。
+   * クリック/タップ（world 座標）。種別ごとのクリック挙動を発火する:
+   *  - voice(鳴き声)SE があれば即時再生（mouse→squeak）。pointerdown は信頼済みユーザージェスチャ
+   *    なので AudioContext の resume 契機にもなる。
+   *  - [UR3-6] clickWiggle を持つ種別（おもちゃ）は、追従を維持したままフリフリを (再)開始する
+   *    （既にフリフリ中でも elapsed を 0 に戻して振り直す＝連打で振り続けられる）。
+   * どちらも持たない種別（foxtail/insect）は無反応。worldX/worldY は UR-6 の受け皿（現状未使用）。
    */
   onPointerDown(_worldX: number, _worldY: number): void {
     const voice = getCritterType(this.deps.typeId).sounds.voice;
     if (voice) {
       this.deps.audio.playOneShot(voice);
+    }
+    if (this.clickWiggle) {
+      this.wiggle = { elapsed: 0 };
     }
   }
 
@@ -170,6 +205,9 @@ export class FollowManualController implements ManualController {
       viewRotation: this.critter.view.rotation,
       viewScaleY: this.critter.view.scale.y,
       tailTip: this.critter.tailTip,
+      // [UR3-6] フリフリ検証用: sway 系(おもちゃ)は state.rotation が pivot 周りの揺れ角。flip 系では
+      // view.rotation=0 のため、揺れは view.rotation でなくこの値に現れる（クリックで振れて減衰）。
+      swayRotation: this.critter.state.rotation,
     };
   }
 }
