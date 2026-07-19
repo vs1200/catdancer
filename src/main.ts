@@ -507,12 +507,14 @@ async function bootstrap(): Promise<void> {
     currentMode?.update(dt);
     // 捕獲バースト演出を進める（進行中が無ければ実質 no-op）。終了分は内部で destroy される。
     captureEffects.update(dt);
-    // 遊びすぎ防止: auto の active 再生（パネル閉・未停止）フレームだけ積算する。
+    // 遊びすぎ防止: auto の active 再生（パネル閉・タブ表示・未停止）フレームだけ積算する。
+    // 合成pause（panelOpen || tabHidden）と条件を揃え、一時停止中は加算しない。
     // tick は update の後（このフレームの描画整合を保つ）。上限到達で自動停止＝
     // despawn＋無音にして再開オーバーレイを出す。
     if (
       currentModeName === "auto" &&
       !panelOpen &&
+      !tabHidden &&
       !autoStoppedByTimer &&
       playLimitTimer.tick(dt)
     ) {
