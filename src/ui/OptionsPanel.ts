@@ -42,6 +42,13 @@ import { sliderToVolume, volumeToSlider } from "./volumeScale";
 const MAX_CRITTER_IMAGE_BYTES = 8 * 1024 * 1024;
 
 /**
+ * 背景画像の受理サイズ上限(bytes, ~8MB)。クリッターと同値で対称化する。
+ * 背景は全画面 cover-fit で拡大されるため、巨大画像の decode() でフル解像度ビットマップを
+ * メモリ展開すると低スペック端末（タブレット常用）でタブがクラッシュしうる。事前に弾く。
+ */
+const MAX_BACKGROUND_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
  * 受理する画像 MIME の allowlist（背景/クリッター共通）。
  * intrinsic サイズを欠く SVG（0/既定寸法で崩れる）や、先頭フレームのみ表示される GIF 等を弾き、
  * 確実にラスタ寸法を持つ png/jpeg/webp のみ通す。file input の accept 属性もこの 3 種に揃える。
@@ -750,6 +757,12 @@ export class OptionsPanel {
     // type 空は判定不能として通し、BackgroundController のデコード失敗フォールバックに委ねる。
     if (isRejectedImageType(file.type)) {
       console.warn("対応していない画像形式のため無視します。", file.type);
+      return;
+    }
+    // 過大ファイルのサイズ上限（~8MB）。背景は全画面 cover-fit で拡大され decode() の
+    // VRAM リスクが大きいため、クリッターと対称にバイトサイズで事前に弾く。
+    if (file.size > MAX_BACKGROUND_IMAGE_BYTES) {
+      console.warn("画像サイズが大きすぎるため無視します。", file.size);
       return;
     }
     void this.settings.setBackgroundImage(file);

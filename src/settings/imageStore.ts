@@ -92,13 +92,18 @@ async function getImageIn(storeName: string, id: string): Promise<Blob | null> {
   }
   try {
     return await new Promise<Blob | null>((resolve) => {
-      const tx = db.transaction(storeName, "readonly");
-      const request = tx.objectStore(storeName).get(id);
-      request.onsuccess = () => {
-        const value = request.result;
-        resolve(value instanceof Blob ? value : null);
-      };
-      request.onerror = () => resolve(null);
+      try {
+        const tx = db.transaction(storeName, "readonly");
+        const request = tx.objectStore(storeName).get(id);
+        request.onsuccess = () => {
+          const value = request.result;
+          resolve(value instanceof Blob ? value : null);
+        };
+        request.onerror = () => resolve(null);
+      } catch {
+        // store 不在等で transaction/objectStore が同期 throw しても契約どおり null を返す。
+        resolve(null);
+      }
     });
   } finally {
     db.close();
