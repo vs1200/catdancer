@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
+import { CUSTOM_CRITTER_TYPE_ID } from "../../src/critters/types/imageCritter";
 import { INSECT_TYPE_ID } from "../../src/critters/types/insect";
 import { MOUSE_TYPE_ID } from "../../src/critters/types/mouse";
 import { TOYS_TYPE_ID } from "../../src/critters/types/toys";
@@ -11,12 +12,13 @@ import {
 } from "../../src/settings/manualTargets";
 
 describe("MANUAL_TARGETS", () => {
-  it("mouse/foxtail/toys/insect を表示順で持つ", () => {
+  it("[UR3-10] mouse/foxtail/toys/insect/custom を表示順で持つ（任意画像を末尾に追加）", () => {
     expect(MANUAL_TARGETS.map((t) => t.id)).toEqual([
       MOUSE_TYPE_ID,
       FOXTAIL_TYPE_ID,
       TOYS_TYPE_ID,
       INSECT_TYPE_ID,
+      CUSTOM_CRITTER_TYPE_ID,
     ]);
   });
 
@@ -37,31 +39,32 @@ describe("MANUAL_TARGETS", () => {
 });
 
 describe("isManualTarget", () => {
-  it("選択可能な id は true", () => {
+  it("選択可能な id は true（[UR3-10] custom=任意画像も含む）", () => {
     expect(isManualTarget(MOUSE_TYPE_ID)).toBe(true);
     expect(isManualTarget(FOXTAIL_TYPE_ID)).toBe(true);
     expect(isManualTarget(TOYS_TYPE_ID)).toBe(true);
     expect(isManualTarget(INSECT_TYPE_ID)).toBe(true);
+    expect(isManualTarget(CUSTOM_CRITTER_TYPE_ID)).toBe(true);
   });
 
   it("未登録/未対象の id は false", () => {
-    expect(isManualTarget("custom")).toBe(false);
     expect(isManualTarget("")).toBe(false);
     expect(isManualTarget("unknown")).toBe(false);
   });
 });
 
 describe("normalizeManualTypeId", () => {
-  it("選択可能な id はそのまま返す", () => {
+  it("選択可能な id はそのまま返す（[UR3-10] custom も許可集合に入る）", () => {
     expect(normalizeManualTypeId(MOUSE_TYPE_ID)).toBe(MOUSE_TYPE_ID);
     expect(normalizeManualTypeId(FOXTAIL_TYPE_ID)).toBe(FOXTAIL_TYPE_ID);
     expect(normalizeManualTypeId(TOYS_TYPE_ID)).toBe(TOYS_TYPE_ID);
     expect(normalizeManualTypeId(INSECT_TYPE_ID)).toBe(INSECT_TYPE_ID);
+    expect(normalizeManualTypeId(CUSTOM_CRITTER_TYPE_ID)).toBe(CUSTOM_CRITTER_TYPE_ID);
   });
 
   it("範囲外・型不一致・欠損は既定（mouse）へ落とす", () => {
-    expect(normalizeManualTypeId("custom")).toBe(DEFAULT_MANUAL_TYPE_ID);
     expect(normalizeManualTypeId("")).toBe(DEFAULT_MANUAL_TYPE_ID);
+    expect(normalizeManualTypeId("unknown")).toBe(DEFAULT_MANUAL_TYPE_ID);
     expect(normalizeManualTypeId(undefined)).toBe(DEFAULT_MANUAL_TYPE_ID);
     expect(normalizeManualTypeId(null)).toBe(DEFAULT_MANUAL_TYPE_ID);
     expect(normalizeManualTypeId(123)).toBe(DEFAULT_MANUAL_TYPE_ID);

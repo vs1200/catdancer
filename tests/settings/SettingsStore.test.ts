@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
+import { CUSTOM_CRITTER_TYPE_ID } from "../../src/critters/types/imageCritter";
 import { MOUSE_TYPE_ID } from "../../src/critters/types/mouse";
 import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
 import { SettingsStore } from "../../src/settings/SettingsStore";
@@ -108,8 +109,15 @@ describe("SettingsStore.setManualTypeId", () => {
 
   it("選択不能な id は既定(mouse)へ正規化する", () => {
     const store = new SettingsStore("test:setManualTypeId:normalize");
-    store.setManualTypeId("custom");
+    // [UR3-10] custom は選択可能になったので、genuinely-invalid な id で正規化を確認する。
+    store.setManualTypeId("bogus");
     expect(store.settings.manualTypeId).toBe(DEFAULT_MANUAL_TYPE_ID);
+  });
+
+  it("[UR3-10] custom(任意画像)は選択可能値として保持する", () => {
+    const store = new SettingsStore("test:setManualTypeId:custom");
+    store.setManualTypeId(CUSTOM_CRITTER_TYPE_ID);
+    expect(store.settings.manualTypeId).toBe(CUSTOM_CRITTER_TYPE_ID);
   });
 });
 

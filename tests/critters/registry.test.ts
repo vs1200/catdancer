@@ -11,7 +11,10 @@ import {
   unregisterCritterType,
 } from "../../src/critters/registry";
 import { FOXTAIL_TYPE_ID, registerFoxtailType } from "../../src/critters/types/foxtail";
-import { createImageCritterType } from "../../src/critters/types/imageCritter";
+import {
+  CUSTOM_CRITTER_TYPE_ID,
+  createImageCritterType,
+} from "../../src/critters/types/imageCritter";
 import { INSECT_TYPE_ID, registerInsectType } from "../../src/critters/types/insect";
 import { MOUSE_TYPE_ID, registerMouseType } from "../../src/critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "../../src/critters/types/toys";
@@ -160,34 +163,32 @@ describe("registry", () => {
 });
 
 describe("createImageCritterType", () => {
-  it("無回転(flip)・尻尾/sway なし・横断(CrossMovement)の画像クリッター型を生成する", () => {
-    const type = createImageCritterType("custom");
-    expect(type.id).toBe("custom");
-    // image critter は textureUrl を描画に使わない（AutoMode は bodyTexture を使う）。死値は空文字。
+  it("[UR3-10] 無回転(flip)・尻尾/sway なしのマウス操作モード専用 画像クリッター型を生成する", () => {
+    const type = createImageCritterType(CUSTOM_CRITTER_TYPE_ID);
+    expect(type.id).toBe(CUSTOM_CRITTER_TYPE_ID);
+    // image critter は textureUrl を描画に使わない（呼び出し側が bodyTexture を渡す）。死値は空文字。
     expect(type.textureUrl).toBe("");
     expect(type.defaultFacing).toBe(1);
     expect(type.hasTail).toBe(false);
     expect(type.sway).toBeUndefined();
-    // 上下反転を絶対に起こさないため rotate は使わない（既定 flip = 水平反転のみ）。
+    // 上下反転を絶対に起こさないため rotate は使わない（既定 flip = 水平反転のみ＝進行方向で左右反転）。
     expect(type.faceMode).toBe("flip");
     expect(type.flipWithFacing).toBe(true);
     // 既定サイズは程よい ~200。
     expect(type.baseSize).toBe(200);
-    // フォールバック / AutoMode どちらも CrossMovement（画面外から横断→despawn）。
+    // フォールバック movement は CrossMovement（実運用は FollowManualController が MouseFollow で override）。
     expect(type.createMovement()).toBeInstanceOf(CrossMovement);
-    const world = createWorldBounds({ width: 800, height: 600 }, 300);
-    const plan = type.createAutoSpawn?.(world, () => 0.5);
-    expect(plan?.movement).toBeInstanceOf(CrossMovement);
-    // spawn 位置は world 内（初フレームで即 despawn しない）。
-    expect(plan).toBeDefined();
-    if (plan) {
-      expect(plan.position.x).toBeGreaterThanOrEqual(world.minX);
-      expect(plan.position.x).toBeLessThanOrEqual(world.maxX);
-    }
+  });
+
+  it("[UR3-10] createAutoSpawn を持たない＝AutoMode(動画モード)の対象外（不変条件）", () => {
+    // createAutoSpawn が undefined の種別は AutoMode.spawnEntry が早期 return するため、
+    // 万一エントリに紛れても動画モードに出ない（型としての二重防御）。
+    const type = createImageCritterType(CUSTOM_CRITTER_TYPE_ID);
+    expect(type.createAutoSpawn).toBeUndefined();
   });
 
   it("baseSize を上書きできる", () => {
-    const type = createImageCritterType("custom", 120);
+    const type = createImageCritterType(CUSTOM_CRITTER_TYPE_ID, 120);
     expect(type.baseSize).toBe(120);
   });
 });

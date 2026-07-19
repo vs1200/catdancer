@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
+import { CUSTOM_CRITTER_TYPE_ID } from "../../src/critters/types/imageCritter";
 import { INSECT_TYPE_ID } from "../../src/critters/types/insect";
 import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
 import {
@@ -761,8 +762,12 @@ describe("serializeSettings / parseSettings", () => {
     const on = createDefaultSettings();
     on.manualTypeId = FOXTAIL_TYPE_ID;
     expect(parseSettings(serializeSettings(on)).manualTypeId).toBe(FOXTAIL_TYPE_ID);
-    // 範囲外の永続値（例: custom）は既定 mouse へ落とす。
-    expect(parseSettings('{"manualTypeId":"custom"}').manualTypeId).toBe(DEFAULT_MANUAL_TYPE_ID);
+    // [UR3-10] custom（任意画像）も選択可能値として往復で保持する。
+    expect(parseSettings(`{"manualTypeId":"${CUSTOM_CRITTER_TYPE_ID}"}`).manualTypeId).toBe(
+      CUSTOM_CRITTER_TYPE_ID,
+    );
+    // 範囲外の永続値（genuinely-invalid な id）は既定 mouse へ落とす。
+    expect(parseSettings('{"manualTypeId":"bogus"}').manualTypeId).toBe(DEFAULT_MANUAL_TYPE_ID);
     // manualTypeId フィールドを持たない旧 localStorage JSON は既定 mouse へフォールバック。
     expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').manualTypeId).toBe(
       DEFAULT_MANUAL_TYPE_ID,

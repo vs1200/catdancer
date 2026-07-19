@@ -1,4 +1,5 @@
 import type { AudioManager } from "../audio/AudioManager";
+import { CUSTOM_CRITTER_TYPE_ID } from "../critters/types/imageCritter";
 import { INSECT_TYPE_ID } from "../critters/types/insect";
 import { MANUAL_TARGETS } from "../settings/manualTargets";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -108,7 +109,7 @@ function createHelpSection(): HTMLElement {
     ],
     [
       "操作するもの",
-      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫）を選べます。虫を選ぶと、動きパターン（クリックで出現／マウス追従）も選べます。",
+      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫／任意画像）を選べます。虫を選ぶと動きパターン（クリックで出現／マウス追従）、任意画像を選ぶと使いたい画像を設定できます（任意画像は動画モードには出ません）。",
     ],
     ["キーボード", "Space＝一時停止／再開、f＝全画面の切替、m＝モードの切替。"],
   ];
@@ -168,6 +169,8 @@ export class OptionsPanel {
   private readonly insectPatternSelect: HTMLSelectElement;
   /** [UR3-5] 虫の動きパターン section（操作対象=虫のときだけ表示・他種別では hidden）。 */
   private readonly insectPatternSection: HTMLElement;
+  /** [UR3-10] 任意画像の画像設定 section（操作対象=任意画像のときだけ表示・他種別では hidden）。 */
+  private readonly customImageSection: HTMLElement;
   /** [UR3-8] マウス操作モードの動きの速さ select（マウスモードタブ）。 */
   private readonly manualSpeedSelect: HTMLSelectElement;
   /** [UR3-8] 動画モード(auto)の動きの速さ select（動画モードタブ。底上げ済み選択肢）。 */
@@ -591,20 +594,15 @@ export class OptionsPanel {
     volSection.append(volRow, muteRow);
     const bgSection = createSection("背景");
     bgSection.append(colorRow, imageRow, resetRow);
-    const critterSection = createSection("オブジェクト");
+    // [UR3-10] 任意画像の設定（アップロード/削除）。共通タブ常時表示ではなく、マウスモードタブで
+    // 操作対象=任意画像 のときだけ表示する（syncManualType が hidden を制御）。
+    const critterSection = createSection("任意画像");
     critterSection.append(critterImageRow, critterResetRow);
     // 初見の飼い主向けの操作導線（純テキスト）。共通タブ末尾に置く。
     const helpSection = createHelpSection();
 
     const commonPanel = this.createTabPanel(0);
-    commonPanel.append(
-      behaviorSection,
-      displaySection,
-      volSection,
-      bgSection,
-      critterSection,
-      helpSection,
-    );
+    commonPanel.append(behaviorSection, displaySection, volSection, bgSection, helpSection);
 
     // --- マウスモードタブ: 操作するもの・(虫のみ)動きパターン・動き(速さ) ---
     const manualSection = createSection("操作対象");
@@ -616,7 +614,9 @@ export class OptionsPanel {
     const manualMotionSection = createSection("動き");
     manualMotionSection.appendChild(manualSpeedRow);
     const manualPanel = this.createTabPanel(1);
-    manualPanel.append(manualSection, insectPatternSection, manualMotionSection);
+    // [UR3-10] 任意画像の画像設定 section（critterSection）も操作対象=任意画像のときだけ表示するため、
+    // 動きパターン section と同じくマウスモードタブに置く（表示切替は syncManualType が担う）。
+    manualPanel.append(manualSection, insectPatternSection, critterSection, manualMotionSection);
 
     // --- 動画モードタブ: 動き(速さ)・出現(プリセット/出現間隔)・出現する種類・遊びすぎ防止 ---
     // [UR3-8] 動画モードの動きの速さ（底上げ済み）。要望「動画モードが全体的に遅い」への主対応のため
@@ -660,6 +660,7 @@ export class OptionsPanel {
     this.manualTypeSelect = manualTypeSelect;
     this.insectPatternSelect = insectPatternSelect;
     this.insectPatternSection = insectPatternSection;
+    this.customImageSection = critterSection;
     this.manualSpeedSelect = manualSpeedSelect;
     this.autoSpeedSelect = autoSpeedSelect;
     this.intervalInput = intervalInput;
@@ -927,6 +928,8 @@ export class OptionsPanel {
     }
     // [UR3-5] 虫の動きパターン UI は操作対象=虫のときだけ表示する（他種別選択で隠す）。
     this.insectPatternSection.hidden = manualTypeId !== INSECT_TYPE_ID;
+    // [UR3-10] 任意画像の画像設定 UI は操作対象=任意画像のときだけ表示する（他種別選択で隠す）。
+    this.customImageSection.hidden = manualTypeId !== CUSTOM_CRITTER_TYPE_ID;
   }
 
   /**

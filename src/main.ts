@@ -24,7 +24,7 @@ import {
   FOXTAIL_TYPE_ID,
   registerFoxtailType,
 } from "./critters/types/foxtail";
-import { createImageCritterType } from "./critters/types/imageCritter";
+import { CUSTOM_CRITTER_TYPE_ID, createImageCritterType } from "./critters/types/imageCritter";
 import { INSECT_TYPE_ID, registerInsectType } from "./critters/types/insect";
 import { MOUSE_TAIL_TEXTURE_URL, MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
 import { registerToysType, TOYS_TYPE_ID } from "./critters/types/toys";
@@ -34,6 +34,7 @@ import { ManualMode } from "./modes/ManualMode";
 import type { Mode } from "./modes/Mode";
 import { FollowManualController } from "./modes/manual/FollowManualController";
 import { FoxtailManualController } from "./modes/manual/FoxtailManualController";
+import { InertManualController } from "./modes/manual/InertManualController";
 import { InsectManualController } from "./modes/manual/InsectManualController";
 import type { ManualControllerFactory } from "./modes/manual/ManualController";
 import { PlayLimitTimer } from "./modes/PlayLimitTimer";
@@ -47,11 +48,6 @@ import { isEditableEventTarget, keyToShortcutAction } from "./ui/keyboardShortcu
 import { OptionsButton } from "./ui/OptionsButton";
 import { OptionsPanel } from "./ui/OptionsPanel";
 import { PlayLimitOverlay } from "./ui/PlayLimitOverlay";
-
-/** ユーザー任意画像クリッターの固定種別 id（単一スロット。imageId は設定 customCritterImageId に持つ）。 */
-const CUSTOM_CRITTER_TYPE_ID = "custom";
-/** ユーザー任意画像クリッターの出現重み（他種別と混ざって程よく出る）。 */
-const CUSTOM_CRITTER_WEIGHT = 1.5;
 
 /**
  * catdancer エントリ（v2 土台: モード切替 + spawn/despawn 基盤）。
@@ -152,6 +148,16 @@ async function bootstrap(): Promise<void> {
         pointer: pointerInput,
         scene,
       });
+  // [UR3-10] ユーザー任意画像クリッター（単一スロット・種別 id=custom）の動的状態。
+  // custom は **マウス操作モード専用**（動画モードには出さない）。下の custom manual factory closure が
+  // customCritterTexture を参照し、ロード済みなら FollowManualController（ネズミ同様の追従＋進行方向で
+  // 左右反転）、未ロードなら InertManualController（critter を出さず画像 UI のみで待機）を返す。
+  // token は最新要求以外の in-flight ロード結果を破棄する（連続差し替え時のリーク/競合防止）。
+  // 宣言を factory 定義より前に置き、closure が呼び出し時点の最新テクスチャを読めるようにする。
+  let customCritterUrl: string | null = null;
+  let customCritterTexture: Texture | null = null;
+  let customCritterToken = 0;
+
   // [UR3-5] 虫の動きパターン（click=クリックで出現 / follow=マウス追従）。虫コントローラ factory が
   // 参照する現在値。subscribe が最新の永続値へ更新し、pattern 変更/種別切替時に factory を呼び直して反映する。
   let insectManualPattern = settings.settings.insectManualPattern;
@@ -192,6 +198,27 @@ async function bootstrap(): Promise<void> {
               scene,
             }),
     ],
+    // [UR3-10] 任意画像（マウス操作モード専用）。ロード済み（テクスチャあり＋型登録済）なら
+    // FollowManualController でネズミ同様のカーソル追従＋進行方向で左右反転（型が faceMode='flip'/
+    // flipWithFacing=true）。未ロードなら InertManualController で critter を出さず待機する（画像 UI のみ）。
+    // customCritterTexture は load/teardown が更新し、選択中は rebuildCurrent() で実行中の 1 体へ反映する。
+    // getCritterType を呼ぶ FollowManualController は型未登録だと throw するため、hasCritterType も併せて確認する。
+    [
+      CUSTOM_CRITTER_TYPE_ID,
+      () => {
+        const texture = customCritterTexture;
+        if (texture && hasCritterType(CUSTOM_CRITTER_TYPE_ID)) {
+          return new FollowManualController({
+            typeId: CUSTOM_CRITTER_TYPE_ID,
+            bodyTexture: texture,
+            audio,
+            pointer: pointerInput,
+            scene,
+          });
+        }
+        return new InertManualController();
+      },
+    ],
   ]);
   const manualMode = new ManualMode({
     factories: manualFactories,
@@ -218,34 +245,45 @@ async function bootstrap(): Promise<void> {
   autoMode.setSpeedScale(settings.settings.autoSpeedScale);
   manualMode.setSpeedScale(settings.settings.manualSpeedScale);
 
-  // --- ユーザー任意画像クリッター（単一スロット）の動的ロード/破棄 ---
-  // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Assets.load →
-  // createImageCritterType 登録 → AutoMode.addEntry。差し替え/削除では必ず objectURL を revoke する。
+  // --- ユーザー任意画像クリッター（単一スロット・マウス操作モード専用）の動的ロード/破棄 ---
+  // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Image.decode →
+  // textureFromImageWithin → createImageCritterType 登録 → customCritterTexture 設定。
+  // [UR3-10] 動画モードには出さない（autoMode には一切 addEntry しない）。custom を操作中なら
+  // rebuildCurrent() で実行中の 1 体（Follow↔Inert）へ反映する。差し替え/削除では必ず objectURL を revoke する。
   // token で最新要求以外の結果を破棄し、連続変更時に旧画像が後から登録される/リークするのを防ぐ。
-  let customCritterUrl: string | null = null;
-  let customCritterTexture: Texture | null = null;
-  let customCritterToken = 0;
+  // （customCritterUrl/Texture/Token は factory closure が参照するため上の manualFactories 定義前で宣言済み。）
 
-  /** 現在のカスタム型/エントリ/テクスチャ/objectURL を解放する（in-flight ロードも token 進行で無効化）。 */
+  /** 現在のカスタム型/テクスチャ/objectURL を解放する（in-flight ロードも token 進行で無効化）。 */
   const teardownCustomCritter = (): void => {
     customCritterToken++;
-    autoMode.removeEntry(CUSTOM_CRITTER_TYPE_ID);
-    // 画面上の当該種別 critter を先に despawn し、旧テクスチャを参照する Sprite を破棄する。
-    // （これを飛ばして texture.destroy すると、飛行中の critter の表示が壊れる。）
+    // 破棄は最後に行うためテクスチャ参照を退避し、先に保持変数を null にする。
+    // これで custom manual factory は「テクスチャ無し＝Inert」を返すようになる（新 critter を出さない）。
+    const texture = customCritterTexture;
+    customCritterTexture = null;
+    // custom を操作中なら、実行中の FollowManualController を rebuild で作り直して Inert へ差し替える。
+    // rebuild は旧コントローラを stop → custom critter を despawn（＝旧テクスチャ参照の Sprite を破棄）
+    // してから、texture=null なので Inert を生成する（新 critter は出ない）。texture.destroy より前に行う。
+    if (manualMode.currentType === CUSTOM_CRITTER_TYPE_ID) {
+      manualMode.rebuildCurrent();
+    }
+    // 二重防御: どのモード/状態でも残留 custom critter をゼロにする（manual 専用のため通常は上で畳み済み）。
     scene.despawnWhere((c) => c.state.typeId === CUSTOM_CRITTER_TYPE_ID);
     if (hasCritterType(CUSTOM_CRITTER_TYPE_ID)) {
       unregisterCritterType(CUSTOM_CRITTER_TYPE_ID);
     }
     // 参照が切れた後にテクスチャを破棄する（destroy(true) で TextureSource ごと解放＝リーク防止）。
-    customCritterTexture?.destroy(true);
-    customCritterTexture = null;
+    texture?.destroy(true);
     if (customCritterUrl) {
       URL.revokeObjectURL(customCritterUrl);
       customCritterUrl = null;
     }
   };
 
-  /** imageId のカスタム画像をロードして種別登録＋AutoMode エントリ追加する（失敗時は安全に無視）。 */
+  /**
+   * imageId のカスタム画像をロードして種別登録＋テクスチャ設定する（失敗時は安全に無視）。
+   * [UR3-10] 動画モードには出さない（autoMode へは追加しない）。custom を操作中なら rebuildCurrent() で
+   * 待機中の Inert を FollowManualController へ差し替えて追従を開始する。
+   */
   const loadCustomCritter = async (imageId: string): Promise<void> => {
     // token は「呼ばれた時点の最新値」を捕捉するだけ（進めない）。差し替え時は subscribe が
     // 先に teardownCustomCritter() で token を進めて in-flight を無効化する（＝二重加算を避ける）。
@@ -297,13 +335,15 @@ async function bootstrap(): Promise<void> {
       unregisterCritterType(CUSTOM_CRITTER_TYPE_ID);
     }
     registerCritterType(createImageCritterType(CUSTOM_CRITTER_TYPE_ID));
-    autoMode.addEntry({
-      typeId: CUSTOM_CRITTER_TYPE_ID,
-      bodyTexture: texture,
-      weight: CUSTOM_CRITTER_WEIGHT,
-    });
     customCritterUrl = url;
     customCritterTexture = texture;
+    // [UR3-10] 任意画像を操作中なら、待機中の Inert を FollowManualController へ作り直して追従開始
+    // （テクスチャありなので factory は Follow 分岐を返す）。他対象を操作中/動画モード中は次に選んだ時に反映。
+    // 起動時復元では switchTo(manualMode.start) がまだ走っておらず未 running のため rebuild は no-op で、
+    // 続く start が最新テクスチャで Follow を立ち上げる。
+    if (manualMode.currentType === CUSTOM_CRITTER_TYPE_ID) {
+      manualMode.rebuildCurrent();
+    }
   };
 
   // --- モード切替コントローラ ---
@@ -505,8 +545,8 @@ async function bootstrap(): Promise<void> {
     }
     if (next.customCritterImageId !== prevCustomCritterId) {
       prevCustomCritterId = next.customCritterImageId;
-      // 設定時/クリア時いずれも、まず現行カスタムを破棄（objectURL revoke 込み）してから、
-      // 設定時は新規ロード（登録＋addEntry）する。
+      // 設定時/クリア時いずれも、まず現行カスタムを破棄（objectURL revoke 込み・custom 操作中なら
+      // Inert へ畳む）してから、設定時は新規ロード（登録＋テクスチャ設定→追従開始）する。
       teardownCustomCritter();
       if (next.customCritterImageId) {
         void loadCustomCritter(next.customCritterImageId);
@@ -521,7 +561,8 @@ async function bootstrap(): Promise<void> {
   audio.setMuted(settings.settings.muted);
   // マウスカーソル非表示設定の起動時復元（既定 false＝通常表示。ON なら #app 上で cursor:none）。
   applyCursorVisibility();
-  // 起動時復元: カスタム画像クリッター（あれば IDB からロードして AutoMode に追加）。
+  // 起動時復元: カスタム画像クリッター（あれば IDB からロードしてテクスチャ設定。マウス操作モードで
+  // 任意画像を選んでいれば switchTo → manualMode.start が Follow を立ち上げて追従を開始する）。
   if (settings.settings.customCritterImageId) {
     await loadCustomCritter(settings.settings.customCritterImageId);
   }

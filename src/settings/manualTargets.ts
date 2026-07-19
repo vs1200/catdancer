@@ -10,6 +10,7 @@
  */
 
 import { FOXTAIL_TYPE_ID } from "../critters/types/foxtail";
+import { CUSTOM_CRITTER_TYPE_ID } from "../critters/types/imageCritter";
 import { INSECT_TYPE_ID } from "../critters/types/insect";
 import { MOUSE_TYPE_ID } from "../critters/types/mouse";
 import { TOYS_TYPE_ID } from "../critters/types/toys";
@@ -24,14 +25,19 @@ export interface ManualTarget {
 
 /**
  * 選択可能な操作対象一覧（セレクタに並べる順）。
- * mouse=ネズミ / foxtail=ねこじゃらし / toys=おもちゃ / insect=虫。
- * UR-4 時点は全対象がカーソル追従（プレースホルダ挙動）。固有挙動は後続タスクで差し替える。
+ * mouse=ネズミ / foxtail=ねこじゃらし / toys=おもちゃ / insect=虫 / custom=任意画像。
+ * 固有挙動は各コントローラが担う（foxtail=画面端フリック / insect=クリック出現 or 追従 / custom=画像追従）。
+ *
+ * [UR3-10] custom（任意画像）は **マウス操作モード専用**（動画モードには出さない）。ここに候補として
+ * 常在させることで「操作するもの」で選択でき、選んだときだけ OptionsPanel が画像設定 UI を出す。
+ * 画像未ロード時は critter を出さない inert コントローラで待機し、画像ロードで追従を開始する。
  */
 export const MANUAL_TARGETS: readonly ManualTarget[] = [
   { id: MOUSE_TYPE_ID, label: "ネズミ" },
   { id: FOXTAIL_TYPE_ID, label: "ねこじゃらし" },
   { id: TOYS_TYPE_ID, label: "おもちゃ" },
   { id: INSECT_TYPE_ID, label: "虫" },
+  { id: CUSTOM_CRITTER_TYPE_ID, label: "任意画像" },
 ];
 
 /** 既定の操作対象 id（ネズミ）。従来のマウス操作＝ネズミ追従を初期値として保つ。 */
