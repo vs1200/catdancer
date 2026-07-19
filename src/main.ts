@@ -131,6 +131,9 @@ async function bootstrap(): Promise<void> {
   });
   // auto 出現の無効化種別を初期反映（reload 復元）。オプションの「出現する種類」ON/OFFに対応。
   autoMode.setDisabledTypes(settings.settings.autoDisabledTypes);
+  // 動きの速さ倍率を両モードへ初期反映（reload 復元）。既定 1.0 で現状と同一挙動。
+  autoMode.setSpeedScale(settings.settings.speedScale);
+  manualMode.setSpeedScale(settings.settings.speedScale);
 
   // --- ユーザー任意画像クリッター（単一スロット）の動的ロード/破棄 ---
   // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Assets.load →
@@ -299,6 +302,7 @@ async function bootstrap(): Promise<void> {
   let prevPlayLimit = settings.settings.autoPlayLimitMinutes;
   let prevCustomCritterId = settings.settings.customCritterImageId;
   let prevMuted = settings.settings.muted;
+  let prevSpeedScale = settings.settings.speedScale;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join(" ");
   settings.subscribe((next) => {
@@ -325,6 +329,12 @@ async function bootstrap(): Promise<void> {
     if (nextAutoDisabledKey !== prevAutoDisabledKey) {
       prevAutoDisabledKey = nextAutoDisabledKey;
       autoMode.setDisabledTypes(next.autoDisabledTypes);
+    }
+    if (next.speedScale !== prevSpeedScale) {
+      prevSpeedScale = next.speedScale;
+      // 両モードへ即反映（現行がどちらでも保持され、モード切替後も持続する）。
+      autoMode.setSpeedScale(next.speedScale);
+      manualMode.setSpeedScale(next.speedScale);
     }
     if (next.mode !== prevMode) {
       prevMode = next.mode;
@@ -387,6 +397,8 @@ async function bootstrap(): Promise<void> {
       // 進行中の捕獲演出数（リーク検証: 捕獲後しばらくして 0 に戻ることを観測する）。
       effectsCount: () => captureEffects.activeCount,
       mode: () => currentModeName,
+      // 現在の動きの速さ倍率（速度スケール検証の観測補助）。
+      speedScale: () => settings.settings.speedScale,
       // モード切替（例: __catScene.setMode('auto')）。settings 経由で switchTo が走る。
       setMode: (name: AppMode) => settings.setMode(name),
       // 特定種別を強制 spawn（sway/pivot/出入りの確認用）。auto モードでないと更新されないため

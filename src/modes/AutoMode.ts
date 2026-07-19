@@ -96,7 +96,9 @@ export class AutoMode implements Mode {
     this.maxActive = deps.maxActive ?? DEFAULT_MAX_ACTIVE;
     this.weights = deps.entries.map((e) => e.weight);
     this.scheduler = new SpawnScheduler({ intervalMs: deps.intervalMs });
-    this.ctx = { world: deps.scene.worldBounds, pointer: null };
+    // speedScale=1 で明示初期化（省略時1扱いだが意図を明確化）。update は world のみ上書きし
+    // speedScale は触らないため、mutate 再利用の ctx に設定は持続する。
+    this.ctx = { world: deps.scene.worldBounds, pointer: null, speedScale: 1 };
     // sounds を持つ種別ごとにコントローラを用意する（無音種別は作らない）。
     for (let i = 0; i < deps.entries.length; i++) {
       this.ensureController(deps.entries[i].typeId);
@@ -164,6 +166,15 @@ export class AutoMode implements Mode {
   /** 出現間隔(ms)を変更する（実行中でも即反映）。 */
   setInterval(ms: number): void {
     this.scheduler.setInterval(ms);
+  }
+
+  /**
+   * 動きの速さの全体倍率を設定する（実行中でも即反映）。ctx に載せておき、Critter.update が
+   * dt に乗じて全 movement へ均一適用する。spawn scheduler は非スケールの実 dt のままなので、
+   * 速度を上げても出現頻度は変わらない（速度と密度の分離）。
+   */
+  setSpeedScale(scale: number): void {
+    this.ctx.speedScale = scale;
   }
 
   /**

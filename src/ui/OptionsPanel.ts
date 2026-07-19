@@ -5,6 +5,7 @@ import {
   AUTO_PLAY_LIMIT_OPTIONS_MINUTES,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
+  SPEED_SCALE_OPTIONS,
 } from "../settings/settingsData";
 import { SPAWN_PRESETS } from "../settings/spawnPresets";
 import {
@@ -87,6 +88,8 @@ export class OptionsPanel {
   /** 全画面トグルボタン。未対応ブラウザでは「表示」セクションごと生成しないため null。 */
   private readonly fullscreenButton: HTMLButtonElement | null;
   private readonly modeSelect: HTMLSelectElement;
+  /** 動きの速さ select（manual/auto 両モードに効くため常時有効）。 */
+  private readonly speedSelect: HTMLSelectElement;
   /** 出現プリセット行（auto モードのみ有効。manual では presetRow ごと淡色化＋ボタン無効化）。 */
   private readonly presetRow: HTMLDivElement;
   /** 出現プリセットボタン群（manual モードで一括 disabled にする）。 */
@@ -200,6 +203,28 @@ export class OptionsPanel {
     });
     modeRow.append(modeLabel, modeSelect);
 
+    // 動きの速さ（manual/auto 両モードに効くため常時有効。出現間隔のように disabled にしない）。
+    // change → settings.setSpeedScale。syncSpeed で現在値を最近傍プリセットへ復元する。
+    const speedRow = document.createElement("div");
+    speedRow.className = "cd-options-row";
+    const speedLabel = document.createElement("label");
+    speedLabel.className = "cd-options-label";
+    speedLabel.textContent = "動きの速さ";
+    speedLabel.htmlFor = "cd-speed-select";
+    const speedSelect = document.createElement("select");
+    speedSelect.id = "cd-speed-select";
+    speedSelect.className = "cd-options-select";
+    for (const opt of SPEED_SCALE_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = String(opt.value);
+      option.textContent = opt.label;
+      speedSelect.appendChild(option);
+    }
+    speedSelect.addEventListener("change", () => {
+      this.settings.setSpeedScale(Number(speedSelect.value));
+    });
+    speedRow.append(speedLabel, speedSelect);
+
     // 出現プリセット（auto モードのみ有効）。出現間隔＋出現する種類をワンタップで束ねて切り替える。
     // ボタン click → settings.applySpawnPreset。適用後は syncFromSettings 経由で interval スライダ表示・
     // 「出現する種類」チェックが新しい値へ自動追従する（applySpawnPreset の通知で syncFromSettings が走る）。
@@ -262,7 +287,7 @@ export class OptionsPanel {
     });
     playLimitRow.append(playLimitLabel, playLimitSelect);
 
-    modeSection.append(modeRow, presetRow, intervalRow, playLimitRow);
+    modeSection.append(modeRow, speedRow, presetRow, intervalRow, playLimitRow);
 
     // --- 背景セクション ---
     const bgSection = document.createElement("section");
@@ -451,6 +476,7 @@ export class OptionsPanel {
     this.closeButton = closeButton;
     this.fullscreenButton = fullscreenButton;
     this.modeSelect = modeSelect;
+    this.speedSelect = speedSelect;
     this.presetRow = presetRow;
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
@@ -607,10 +633,31 @@ export class OptionsPanel {
   /** 現在の設定値をコントロールへ反映する（起動時・外部変更・開いた時に呼ぶ）。 */
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
+    this.syncSpeed(settings.speedScale);
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
     this.syncMute(settings.muted);
+  }
+
+  /**
+   * 動きの速さ select を現在値へ復元する。プリセット外の永続値でも壊れないよう、
+   * SPEED_SCALE_OPTIONS の中から数値が最も近い選択肢を選ぶ（一致があればそれが最近傍）。
+   */
+  private syncSpeed(speedScale: number): void {
+    let best = SPEED_SCALE_OPTIONS[0];
+    let bestDist = Math.abs(best.value - speedScale);
+    for (const opt of SPEED_SCALE_OPTIONS) {
+      const dist = Math.abs(opt.value - speedScale);
+      if (dist < bestDist) {
+        best = opt;
+        bestDist = dist;
+      }
+    }
+    const text = String(best.value);
+    if (this.speedSelect.value !== text) {
+      this.speedSelect.value = text;
+    }
   }
 
   /** ミュートチェックボックスを settings.muted から復元する（外部変更にも追従）。 */

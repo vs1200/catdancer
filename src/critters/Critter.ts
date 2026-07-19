@@ -148,7 +148,16 @@ export class Critter {
   }
 
   update(dtSeconds: number, ctx: MovementContext): void {
-    this.movement.update(this.state, dtSeconds, ctx);
+    // ctx.speedScale で critter 全体を 1 つのスケール時計で動かす（movement/回頭/尻尾すべてに
+    // 同じ scaledDt を渡す＝視覚的に一貫）。未指定は 1 として扱い、scale=1 なら scaledDt===dtSeconds
+    // なので既存挙動は完全に不変（後方互換）。非正 dt でも scale 乗算で符号は保たれるため、
+    // movement 側の非正 dt ガードはそのまま効く。
+    // 割り切り: state.velocity は movement が設定した値のまま（等速 movement では velocity 自体は
+    // スケールされず、実移動量 velocity*scaledDt にのみ倍率が乗る）。視覚速度を主眼とし、
+    // 走行音レベルの完全連動までは求めない。
+    const scale = ctx.speedScale ?? 1;
+    const scaledDt = dtSeconds * scale;
+    this.movement.update(this.state, scaledDt, ctx);
 
     // rotate 系は速度ベクトルから heading を平滑更新（静止時は保持＝くるくる回らない）。
     if (this.faceMode === "rotate") {
@@ -156,7 +165,7 @@ export class Critter {
         this.state.heading,
         this.state.velocity.x,
         this.state.velocity.y,
-        dtSeconds,
+        scaledDt,
         HEADING_UPDATE_OPTS,
       );
     }
@@ -164,7 +173,7 @@ export class Critter {
     // 尻尾は最新の本体位置/向きから頭ワールド座標を求め、ワールド空間でトレイルさせる。
     if (this.tail) {
       const head = this.computeTailHead();
-      this.tail.update(head.headX, head.headY, head.backX, head.backY, dtSeconds);
+      this.tail.update(head.headX, head.headY, head.backX, head.backY, scaledDt);
     }
 
     this.syncView();

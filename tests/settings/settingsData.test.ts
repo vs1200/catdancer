@@ -10,14 +10,18 @@ import {
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
   DEFAULT_MUTED,
+  DEFAULT_SPEED_SCALE,
   MAX_AUTO_PLAY_LIMIT_MINUTES,
   MAX_AUTO_SPAWN_INTERVAL_MS,
+  MAX_SPEED_SCALE,
   MIN_AUTO_SPAWN_INTERVAL_MS,
+  MIN_SPEED_SCALE,
   normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeMode,
   normalizeMuted,
   normalizeSettings,
+  normalizeSpeedScale,
   parseSettings,
   serializeSettings,
 } from "../../src/settings/settingsData";
@@ -188,8 +192,44 @@ describe("clampPlayLimitMinutes", () => {
   });
 });
 
+describe("normalizeSpeedScale", () => {
+  it("範囲内はそのまま（プリセット値・境界含む）", () => {
+    expect(normalizeSpeedScale(0.6)).toBe(0.6);
+    expect(normalizeSpeedScale(1.0)).toBe(1.0);
+    expect(normalizeSpeedScale(1.4)).toBe(1.4);
+    expect(normalizeSpeedScale(1.8)).toBe(1.8);
+    expect(normalizeSpeedScale(MIN_SPEED_SCALE)).toBe(MIN_SPEED_SCALE);
+    expect(normalizeSpeedScale(MAX_SPEED_SCALE)).toBe(MAX_SPEED_SCALE);
+  });
+
+  it("範囲外は下限/上限へクランプ", () => {
+    expect(normalizeSpeedScale(0.01)).toBe(MIN_SPEED_SCALE);
+    expect(normalizeSpeedScale(MIN_SPEED_SCALE - 0.1)).toBe(MIN_SPEED_SCALE);
+    expect(normalizeSpeedScale(99)).toBe(MAX_SPEED_SCALE);
+    expect(normalizeSpeedScale(MAX_SPEED_SCALE + 0.1)).toBe(MAX_SPEED_SCALE);
+  });
+
+  it("0以下は既定へ（>0 のみ受理）", () => {
+    expect(normalizeSpeedScale(0)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(-1)).toBe(DEFAULT_SPEED_SCALE);
+  });
+
+  it("数値化できない/非有限/欠損は既定(1.0)へ", () => {
+    expect(normalizeSpeedScale(Number.NaN)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(Number.POSITIVE_INFINITY)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(undefined)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(null)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale("abc")).toBe(DEFAULT_SPEED_SCALE);
+    expect(DEFAULT_SPEED_SCALE).toBe(1.0);
+  });
+
+  it("数値文字列は解釈する", () => {
+    expect(normalizeSpeedScale("1.4")).toBe(1.4);
+  });
+});
+
 describe("createDefaultSettings", () => {
-  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし", () => {
+  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし / 速さ 1.0", () => {
     const s = createDefaultSettings();
     expect(s).toEqual({
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
@@ -200,6 +240,7 @@ describe("createDefaultSettings", () => {
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
+      speedScale: DEFAULT_SPEED_SCALE,
     });
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
     expect(DEFAULT_MUTED).toBe(false);
@@ -207,6 +248,7 @@ describe("createDefaultSettings", () => {
     expect(DEFAULT_MODE).toBe("manual");
     expect(DEFAULT_AUTO_SPAWN_INTERVAL_MS).toBe(1500);
     expect(DEFAULT_AUTO_PLAY_LIMIT_MINUTES).toBe(0);
+    expect(DEFAULT_SPEED_SCALE).toBe(1.0);
   });
 
   it("呼び出しごとに独立したオブジェクトを返す（共有参照でない）", () => {
@@ -234,6 +276,7 @@ describe("normalizeSettings", () => {
         autoPlayLimitMinutes: 15,
         customCritterImageId: "critter-1",
         autoDisabledTypes: ["insect", "toys"],
+        speedScale: 1.4,
       }),
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
@@ -244,6 +287,7 @@ describe("normalizeSettings", () => {
       autoPlayLimitMinutes: 15,
       customCritterImageId: "critter-1",
       autoDisabledTypes: ["insect", "toys"],
+      speedScale: 1.4,
     });
   });
 
@@ -353,6 +397,20 @@ describe("normalizeSettings", () => {
     expect(s.background.color).toBe(DEFAULT_BACKGROUND_COLOR);
     expect(s.masterVolume).toBe(1);
   });
+
+  it("speedScale は欠損で既定(1.0)、範囲外はクランプ、0以下/非有限は既定（後方互換）", () => {
+    // フィールドを持たない旧 localStorage は既定 1.0（後方互換）。
+    expect(normalizeSettings({}).speedScale).toBe(DEFAULT_SPEED_SCALE);
+    // 範囲内はそのまま。
+    expect(normalizeSettings({ speedScale: 1.4 }).speedScale).toBe(1.4);
+    // 範囲外はクランプ。
+    expect(normalizeSettings({ speedScale: 99 }).speedScale).toBe(MAX_SPEED_SCALE);
+    expect(normalizeSettings({ speedScale: 0.01 }).speedScale).toBe(MIN_SPEED_SCALE);
+    // 0以下/非有限は既定へ。
+    expect(normalizeSettings({ speedScale: 0 }).speedScale).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSettings({ speedScale: -2 }).speedScale).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSettings({ speedScale: Number.NaN }).speedScale).toBe(DEFAULT_SPEED_SCALE);
+  });
 });
 
 describe("serializeSettings / parseSettings", () => {
@@ -366,6 +424,7 @@ describe("serializeSettings / parseSettings", () => {
       autoPlayLimitMinutes: 10,
       customCritterImageId: "critter-xyz",
       autoDisabledTypes: ["foxtail", "insect"],
+      speedScale: 1.8,
     };
     const restored = parseSettings(serializeSettings(original));
     expect(restored).toEqual(original);
@@ -383,6 +442,7 @@ describe("serializeSettings / parseSettings", () => {
       "masterVolume",
       "mode",
       "muted",
+      "speedScale",
     ]);
     expect(Object.keys(parsed.background as object).sort()).toEqual(["color", "imageId", "type"]);
   });
@@ -407,6 +467,7 @@ describe("serializeSettings / parseSettings", () => {
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
+      speedScale: DEFAULT_SPEED_SCALE,
     });
   });
 

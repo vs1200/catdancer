@@ -13,6 +13,7 @@ import {
   normalizeHexColor,
   normalizeMode,
   normalizeMuted,
+  normalizeSpeedScale,
   parseSettings,
   serializeSettings,
 } from "./settingsData";
@@ -58,6 +59,7 @@ export class SettingsStore {
       autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
       customCritterImageId: this.state.customCritterImageId,
       autoDisabledTypes: [...this.state.autoDisabledTypes],
+      speedScale: this.state.speedScale,
     };
   }
 
@@ -176,6 +178,15 @@ export class SettingsStore {
   /** auto モードの出現間隔(ms)を設定する（範囲外はクランプして永続化＋通知）。 */
   setAutoSpawnInterval(ms: number): void {
     this.state.autoSpawnIntervalMs = clampSpawnInterval(ms);
+    this.commit();
+  }
+
+  /**
+   * 動きの速さの全体倍率を設定する（[MIN,MAX] にクランプ／非有限・0以下は既定へ。永続化＋通知）。
+   * manual/auto 両モードに効く。既定 1.0 で現状と同一挙動。
+   */
+  setSpeedScale(value: number): void {
+    this.state.speedScale = normalizeSpeedScale(value);
     this.commit();
   }
 

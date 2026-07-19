@@ -39,7 +39,9 @@ export class ManualMode implements Mode {
 
   constructor(deps: ManualModeDeps) {
     this.deps = deps;
-    this.ctx = { world: deps.scene.worldBounds, pointer: null };
+    // speedScale=1 で明示初期化（省略時1扱いだが意図を明確化）。update は world/pointer のみ
+    // 上書きし speedScale は触らないため、mutate 再利用の ctx に設定は持続する。
+    this.ctx = { world: deps.scene.worldBounds, pointer: null, speedScale: 1 };
     // ポインタ追従はピーク速度が大きい(~3600)ため、走行音写像は上方調整版で抑揚を残す。
     this.audioCtrl = new CritterAudioController(deps.audio, deps.sounds, {
       scurry: SCURRY_LEVEL_MOUSE_FOLLOW,
@@ -77,6 +79,14 @@ export class ManualMode implements Mode {
       this.deps.scene.despawn(this.critter);
       this.critter = null;
     }
+  }
+
+  /**
+   * 動きの速さの全体倍率を設定する（実行中でも即反映）。ctx に載せておき、Critter.update が
+   * dt に乗じて追従の動き全体へ均一適用する（マウス追従の速さが倍率で変わる）。
+   */
+  setSpeedScale(scale: number): void {
+    this.ctx.speedScale = scale;
   }
 
   /**

@@ -10,6 +10,12 @@ export interface MovementContext {
   world: WorldBounds;
   /** ポインタ位置（world 座標）。無ければ null。次タスクのマウス追従で使用。 */
   pointer: Vec2 | null;
+  /**
+   * critter の動き全体の速度倍率。Critter が dt に乗じる（未指定=1）。
+   * movement 実装はこの値を読まない（透過）＝ Critter がスケール済み dt を渡すため、
+   * 個別 movement を改変せず全 movement へ均一に効かせられる。倍率1のとき挙動は現状と同一。
+   */
+  speedScale?: number;
 }
 
 /**

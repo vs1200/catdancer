@@ -51,6 +51,11 @@ export interface AppSettings {
    * カスタム画像クリッターは画像の設定/削除が実質のON/OFFなのでこのリストの対象外。
    */
   autoDisabledTypes: string[];
+  /**
+   * 画面内オブジェクトの動きの速さの全体倍率（既定 1.0＝現状同一）。manual/auto 両モードに効く。
+   * Critter.update が dt に乗じて全 movement へ均一適用する（出現頻度＝spawn 間隔とは独立）。
+   */
+  speedScale: number;
 }
 
 /** 既定の背景色（単色 白）。 */
@@ -73,6 +78,27 @@ export const DEFAULT_AUTO_PLAY_LIMIT_MINUTES = 0;
 export const MAX_AUTO_PLAY_LIMIT_MINUTES = 180;
 /** UI に並べる遊びすぎ防止の選択肢(分)。0＝なし（OFF）。 */
 export const AUTO_PLAY_LIMIT_OPTIONS_MINUTES: readonly number[] = [0, 5, 10, 15, 30];
+
+/** 動きの速さ倍率の既定値（1.0＝現状と完全に同一）。 */
+export const DEFAULT_SPEED_SCALE = 1.0;
+/** 動きの速さ倍率の下限（永続値の暴走ガード）。 */
+export const MIN_SPEED_SCALE = 0.3;
+/** 動きの速さ倍率の上限（永続値の暴走ガード）。 */
+export const MAX_SPEED_SCALE = 2.5;
+
+/** UI 用の動きの速さ倍率選択肢（ラベルと値）。 */
+export interface SpeedScaleOption {
+  label: string;
+  value: number;
+}
+
+/** UI に並べる動きの速さの選択肢。value は [MIN,MAX] 内。標準=1.0 が既定。 */
+export const SPEED_SCALE_OPTIONS: readonly SpeedScaleOption[] = [
+  { label: "ゆっくり", value: 0.6 },
+  { label: "標準", value: 1.0 },
+  { label: "はやい", value: 1.4 },
+  { label: "とてもはやい", value: 1.8 },
+];
 
 /** `#rgb` / `#rrggbb`（大小文字可）を受理する正規表現。 */
 const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -166,6 +192,18 @@ export function clampPlayLimitMinutes(value: unknown): number {
   return rounded > MAX_AUTO_PLAY_LIMIT_MINUTES ? MAX_AUTO_PLAY_LIMIT_MINUTES : rounded;
 }
 
+/**
+ * 動きの速さ倍率を正規化する。数値化して finite かつ >0 なら [MIN,MAX] にクランプ。
+ * 非有限・0以下・数値化不能・欠損は既定(1.0)へフォールバックする。
+ */
+export function normalizeSpeedScale(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    return DEFAULT_SPEED_SCALE;
+  }
+  return n < MIN_SPEED_SCALE ? MIN_SPEED_SCALE : n > MAX_SPEED_SCALE ? MAX_SPEED_SCALE : n;
+}
+
 /** デフォルト設定を新規生成する（呼び出しごとに独立したオブジェクト）。 */
 export function createDefaultSettings(): AppSettings {
   return {
@@ -181,6 +219,7 @@ export function createDefaultSettings(): AppSettings {
     autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
     customCritterImageId: null,
     autoDisabledTypes: [],
+    speedScale: DEFAULT_SPEED_SCALE,
   };
 }
 
@@ -198,6 +237,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   customCritterImageId: null,
   autoDisabledTypes: Object.freeze([] as string[]) as string[],
+  speedScale: DEFAULT_SPEED_SCALE,
 }) as AppSettings;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -230,6 +270,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
     customCritterImageId,
     autoDisabledTypes: normalizeAutoDisabledTypes(obj.autoDisabledTypes),
+    speedScale: normalizeSpeedScale(obj.speedScale),
   };
 }
 
@@ -248,6 +289,7 @@ export function serializeSettings(settings: AppSettings): string {
     autoPlayLimitMinutes: settings.autoPlayLimitMinutes,
     customCritterImageId: settings.customCritterImageId,
     autoDisabledTypes: [...settings.autoDisabledTypes],
+    speedScale: settings.speedScale,
   };
   return JSON.stringify(plain);
 }
