@@ -20,12 +20,21 @@ export interface MouseFollowOptions {
 
 /**
  * 既定パラメータ。臨界減衰(ζ=1)で俊敏かつオーバーシュートせずに寄せる値。
- * smoothTime=0.09s → 目標近傍(残り~5%)まで概ね 0.2s、full-screen flick でも ~0.3s 程度。
- * maxSpeed は瞬間ワープを抑える保険（連続移動では時定数が支配的で滑らか）。
+ *
+ * [UR-8] マウス操作の追従が全体的にもたつくとの要望を受け、基準の追従速度を引き上げた。
+ * 旧値(smoothTime=0.09, maxSpeed=3600)を speedScale「とてもはやい」(1.8) で走らせたときの
+ * 俊敏さ・速度上限を、speedScale「標準」(1.0) で再現するよう両値を 1.8 倍相当で再調整した:
+ *   - smoothTime 0.09→0.05 (=0.09/1.8): 追従ラグ(時定数)を短縮。600px ジャンプの 90% 到達が
+ *     約 0.23s→約 0.13s（＝旧とてもはやい相当）。small ほど俊敏。
+ *   - maxSpeed 3600→6480 (=3600×1.8): 実効の追従速度上限(=maxSpeed×speedScale)も旧とてもはやい
+ *     相当へ引き上げ。速い振り(flick)が上限で clip して遅く感じる退行を防ぐ。
+ *     maxChange=maxSpeed×smoothTime=324 は旧値と不変なので瞬間ワープ抑制の効きは維持する。
+ * speedScale の各段(ゆっくり0.6/標準1.0/はやい1.4/とてもはやい1.8)は引き続き相対的に機能する。
+ * 本定数は MouseFollowMovement(=マウス操作モード専用)のみに効き、auto(動画)モードには波及しない。
  */
 export const MOUSE_FOLLOW_DEFAULTS = {
-  smoothTime: 0.09,
-  maxSpeed: 3600,
+  smoothTime: 0.05,
+  maxSpeed: 6480,
   edgeThreshold: 40,
 } as const satisfies Required<MouseFollowOptions>;
 

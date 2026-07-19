@@ -27,7 +27,7 @@ export const SCURRY_LEVEL_DEFAULTS = {
 
 /**
  * ポインタ追従ネズミ（ManualMode）の走行音写像。
- * MouseFollowMovement はピーク速度が大きい(~3600)ため、既定 maxSpeed=480 では即飽和して抑揚が
+ * MouseFollowMovement はピーク速度が大きい(~6480, [UR-8]で上方調整)ため、既定 maxSpeed=480 では即飽和して抑揚が
  * 出ない。maxSpeed を上方調整して「速いほど活発」の抑揚が残るようにする。
  */
 export const SCURRY_LEVEL_MOUSE_FOLLOW = {
