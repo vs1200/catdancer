@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorldBounds } from "../../src/core/worldBounds";
+import { createWorldBounds, isInsideViewport } from "../../src/core/worldBounds";
 import { createCritterState } from "../../src/critters/CritterState";
 import { hasExitedWorld } from "../../src/movement/CrossMovement";
 import {
@@ -9,7 +9,7 @@ import {
   erraticEntryVelocity,
   erraticPositionAt,
   erraticTotalSeconds,
-  planErraticFromPoint,
+  planErraticFromOffscreen,
   planErraticSpawn,
 } from "../../src/movement/ErraticMovement";
 import type { MovementContext } from "../../src/movement/Movement";
@@ -99,22 +99,25 @@ describe("planErraticSpawn", () => {
   });
 });
 
-describe("planErraticFromPoint", () => {
-  it("enter はクリック位置そのまま・world 内(即 despawn しない)、exit は world 外(despawn 保証)", () => {
-    const start = { x: 400, y: 300 }; // viewport 内のクリック位置
-    const plan = planErraticFromPoint(start, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
-    // 始点はクリック位置そのもの（画面外進入ではなく「その場から」始まる）。
-    expect(plan.enter).toEqual(start);
-    // クリック位置は world 内なので初フレームで即 despawn しない。
+describe("planErraticFromOffscreen", () => {
+  it("enter は画面外(viewport 外・world 内)・wp0=target・exit は world 外・残り wp は inset 内", () => {
+    const target = { x: 400, y: 300 }; // viewport 内のクリック位置（飛び込み先）
+    const plan = planErraticFromOffscreen(target, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
+    // waypoints[0] はクリック位置そのもの（進入辺→クリック点へ直進で飛び込む先）。
+    expect(plan.waypoints[0]).toEqual(target);
+    // enter は画面外(viewport 外)＝縁から現れる。
+    expect(isInsideViewport(world, plan.enter)).toBe(false);
+    // ただし world 端(inclusive)＝world 内なので初フレームで即 despawn しない。
     expect(hasExitedWorld(plan.enter, world)).toBe(false);
     // 退場先は world 外（寿命後に確実に despawn）。
     expect(hasExitedWorld(plan.exit, world)).toBe(true);
     // waypoint 個数はレンジ内。
     expect(plan.waypoints.length).toBeGreaterThanOrEqual(ERRATIC_SPAWN_DEFAULTS.waypointsMin);
     expect(plan.waypoints.length).toBeLessThanOrEqual(ERRATIC_SPAWN_DEFAULTS.waypointsMax);
-    // waypoint は viewport の inset 内（無限遠へ飛ばさない）。
+    // waypoints[1..]（roam 先）は viewport の inset 内（無限遠へ飛ばさない）。
     const inset = ERRATIC_SPAWN_DEFAULTS.insetFrac;
-    for (const wp of plan.waypoints) {
+    for (let i = 1; i < plan.waypoints.length; i++) {
+      const wp = plan.waypoints[i];
       expect(wp.x).toBeGreaterThanOrEqual(viewport.width * inset - 1e-6);
       expect(wp.x).toBeLessThanOrEqual(viewport.width * (1 - inset) + 1e-6);
       expect(wp.y).toBeGreaterThanOrEqual(viewport.height * inset - 1e-6);
@@ -123,25 +126,63 @@ describe("planErraticFromPoint", () => {
     expect(plan.facing).toBe(1);
   });
 
-  it("画面内のどのクリック位置でも enter=start（複数点で確認）", () => {
-    for (const start of [
-      { x: 0, y: 0 },
-      { x: viewport.width, y: viewport.height },
+  it("enterEdge セレクタ(rng[0])で進入辺が決まり、enter は target と同軸(画面外→クリック点へ直進)", () => {
+    const target = { x: 400, y: 300 };
+    const enterOf = (sel: number) =>
+      planErraticFromOffscreen(target, world, seqRng([sel]), ERRATIC_SPAWN_DEFAULTS, SIZE).enter;
+    // 左右辺は world.min/maxX 上で target と同 y、上下辺は world.min/maxY 上で target と同 x。
+    expect(enterOf(0.1)).toEqual({ x: world.minX, y: target.y }); // left
+    expect(enterOf(0.3)).toEqual({ x: world.maxX, y: target.y }); // right
+    expect(enterOf(0.6)).toEqual({ x: target.x, y: world.minY }); // top
+    expect(enterOf(0.9)).toEqual({ x: target.x, y: world.maxY }); // bottom
+    // いずれも画面外(viewport 外)だが world 内（即 despawn しない）。
+    for (const sel of [0.1, 0.3, 0.6, 0.9]) {
+      expect(isInsideViewport(world, enterOf(sel))).toBe(false);
+      expect(hasExitedWorld(enterOf(sel), world)).toBe(false);
+    }
+  });
+
+  it("進入(entrySec)でちょうど target(=wp0)へ着地＝画面外→クリック点の飛び込みが完了する", () => {
+    const target = { x: 400, y: 300 };
+    // enterEdge=top(全 0.5→top): enter=(target.x, world.minY)＝真上の画面外。
+    const plan = planErraticFromOffscreen(target, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
+    // t<=0 は enter（画面外）。
+    expect(erraticPositionAt(plan, 0)).toEqual(plan.enter);
+    expect(isInsideViewport(world, erraticPositionAt(plan, 0))).toBe(false);
+    // 進入途中は enter(画面外)と target の間を前進する（y は minY→target.y へ増加）。
+    const mid = erraticPositionAt(plan, plan.entrySec / 2);
+    expect(mid.y).toBeGreaterThan(plan.enter.y);
+    expect(mid.y).toBeLessThan(target.y);
+    // 進入完了(entrySec)でちょうど wp0=target（飛び込み着地）。
+    expect(erraticPositionAt(plan, plan.entrySec)).toEqual(target);
+  });
+
+  it("画面内のどのクリック位置でも wp0=target で enter は画面外(world 内)", () => {
+    for (const target of [
+      { x: 10, y: 10 },
+      { x: viewport.width - 10, y: viewport.height - 10 },
       { x: 123, y: 456 },
     ]) {
-      const plan = planErraticFromPoint(start, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
-      expect(plan.enter).toEqual(start);
+      const plan = planErraticFromOffscreen(
+        target,
+        world,
+        seqRng([]),
+        ERRATIC_SPAWN_DEFAULTS,
+        SIZE,
+      );
+      expect(plan.waypoints[0]).toEqual(target);
+      expect(isInsideViewport(world, plan.enter)).toBe(false);
       expect(hasExitedWorld(plan.enter, world)).toBe(false);
     }
   });
 
   it("exit は size に依らず全 edge で world 外(despawn 保証)", () => {
-    // rng 消費順の先頭 8 個(waypointCount..jitterPhase)を 0.5 に固定し、9 個目(exitEdge)で退場辺を選ぶ。
+    // rng 消費順の先頭 9 個(enterEdge..jitterPhase)を 0.5 に固定し、10 個目(exitEdge)で退場辺を選ぶ。
     const withExitEdge = (edgeSel: number, size: number) =>
-      planErraticFromPoint(
+      planErraticFromOffscreen(
         { x: 400, y: 300 },
         world,
-        seqRng([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, edgeSel]),
+        seqRng([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, edgeSel]),
         ERRATIC_SPAWN_DEFAULTS,
         size,
       );
@@ -156,38 +197,60 @@ describe("planErraticFromPoint", () => {
     }
   });
 
-  it("初速はクリック位置から wp0 方向を向く（spawn 直後の heading を進行方向へ）", () => {
-    // 決定論シーケンスで wp0 がクリック点より右下に来るようにし、初速の符号を検証する。
-    const seq = [0.1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.2, 0.5, 0.9, 0.9]; // 末尾2つ=wp0(x,y)大きめ
-    const start = { x: 100, y: 100 };
-    const plan = planErraticFromPoint(start, world, seqRng(seq), ERRATIC_SPAWN_DEFAULTS, SIZE);
-    expect(plan.waypoints[0].x).toBeGreaterThan(start.x);
-    expect(plan.waypoints[0].y).toBeGreaterThan(start.y);
-    const v = erraticEntryVelocity(plan);
-    expect(v.x).toBeGreaterThan(0);
-    expect(v.y).toBeGreaterThan(0);
-    expect(Number.isFinite(v.x)).toBe(true);
-    expect(Number.isFinite(v.y)).toBe(true);
+  it("wp0=target は rng を消費しない＝rng 消費順が固定(target を変えても残り wp・他パラメータは不変)", () => {
+    const seq = [0.2, 0.7, 0.3, 0.4, 0.5, 0.6, 0.5, 0.5, 0.1, 0.8, 0.35, 0.65, 0.2, 0.8, 0.4, 0.6];
+    const a = planErraticFromOffscreen(
+      { x: 100, y: 100 },
+      world,
+      seqRng(seq),
+      ERRATIC_SPAWN_DEFAULTS,
+      SIZE,
+    );
+    const b = planErraticFromOffscreen(
+      { x: 700, y: 500 },
+      world,
+      seqRng(seq),
+      ERRATIC_SPAWN_DEFAULTS,
+      SIZE,
+    );
+    // wp0 のみ target が異なる。
+    expect(a.waypoints[0]).toEqual({ x: 100, y: 100 });
+    expect(b.waypoints[0]).toEqual({ x: 700, y: 500 });
+    // 残り waypoint(1..) は同一 rng 列で完全一致（target は rng を消費しない＝消費順が固定）。
+    expect(a.waypoints.slice(1)).toEqual(b.waypoints.slice(1));
+    // waypoint 非依存のパラメータも一致。
+    expect(a.entrySec).toBe(b.entrySec);
+    expect(a.dashSec).toBe(b.dashSec);
+    expect(a.pauseSec).toBe(b.pauseSec);
+    expect(a.exitSec).toBe(b.exitSec);
+    expect(a.jitterAmp).toBe(b.jitterAmp);
+    expect(a.jitterFreq).toBe(b.jitterFreq);
+    expect(a.jitterPhase).toBe(b.jitterPhase);
   });
 
-  it("統合: クリック点から始まり roam は viewport 近辺、総寿命後は world 外へ抜ける(despawn)", () => {
-    const seq = [0.9, 0.4, 0.6, 0.3, 0.5, 0.5, 0.5, 0.2, 0.7, 0.35, 0.65, 0.2, 0.8, 0.5, 0.4];
-    const start = { x: 500, y: 350 };
-    const plan = planErraticFromPoint(start, world, seqRng(seq), ERRATIC_SPAWN_DEFAULTS, SIZE);
-    const state = stateAt(plan.enter.x, plan.enter.y, erraticEntryVelocity(plan).x);
-    // 始点は world 内（即 despawn しない）。
-    expect(hasExitedWorld(state.position, world)).toBe(false);
+  it("統合: 画面外(enter)→クリック点→roam は viewport 近辺、総寿命後は world 外へ抜ける(despawn)", () => {
+    const seq = [0.05, 0.4, 0.6, 0.3, 0.5, 0.5, 0.5, 0.2, 0.7, 0.35, 0.65, 0.2, 0.8, 0.5, 0.4];
+    const target = { x: 500, y: 350 };
+    const plan = planErraticFromOffscreen(target, world, seqRng(seq), ERRATIC_SPAWN_DEFAULTS, SIZE);
+    // 始点は画面外(viewport 外)だが world 内（即 despawn しない）。
+    expect(isInsideViewport(world, plan.enter)).toBe(false);
+    expect(hasExitedWorld(plan.enter, world)).toBe(false);
+    const v0 = erraticEntryVelocity(plan);
+    const state = stateAt(plan.enter.x, plan.enter.y, v0.x, v0.y);
     const m = new ErraticMovement(plan);
     const total = erraticTotalSeconds(plan);
     const roamEndFrame = Math.floor((total - plan.exitSec) * 60);
     const pad = plan.jitterAmp + 1e-3;
     for (let i = 0; i < roamEndFrame; i++) {
       m.update(state, 1 / 60, ctx);
-      // roam 中は viewport 近辺（無限遠へ飛ばない）。
-      expect(state.position.x).toBeGreaterThanOrEqual(-pad);
-      expect(state.position.x).toBeLessThanOrEqual(viewport.width + pad);
-      expect(state.position.y).toBeGreaterThanOrEqual(-pad);
-      expect(state.position.y).toBeLessThanOrEqual(viewport.height + pad);
+      const elapsed = (i + 1) / 60;
+      if (elapsed >= plan.entrySec) {
+        // 飛び込み完了後(roam)は viewport 近辺（無限遠へ飛ばない）。
+        expect(state.position.x).toBeGreaterThanOrEqual(-pad);
+        expect(state.position.x).toBeLessThanOrEqual(viewport.width + pad);
+        expect(state.position.y).toBeGreaterThanOrEqual(-pad);
+        expect(state.position.y).toBeLessThanOrEqual(viewport.height + pad);
+      }
     }
     // 総寿命後は world 外へ達し despawn 対象になる。
     for (let i = 0; i < Math.ceil(total * 60) + 120; i++) {
@@ -445,9 +508,9 @@ describe("ErraticMovement.hasExpired", () => {
     expect(m.hasExpired()).toBe(false);
   });
 
-  it("クリック出現(planErraticFromPoint)の plan でも total 境界で expired へ切り替わる", () => {
-    const start = { x: 400, y: 300 };
-    const plan = planErraticFromPoint(start, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
+  it("画面外出現(planErraticFromOffscreen)の plan でも total 境界で expired へ切り替わる", () => {
+    const target = { x: 400, y: 300 };
+    const plan = planErraticFromOffscreen(target, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
     const total = erraticTotalSeconds(plan);
     const state = stateAt(plan.enter.x, plan.enter.y);
     const m = new ErraticMovement(plan);

@@ -8,7 +8,7 @@ import { INSECT_TYPE_ID } from "../../critters/types/insect";
 import {
   ErraticMovement,
   erraticEntryVelocity,
-  planErraticFromPoint,
+  planErraticFromOffscreen,
 } from "../../movement/ErraticMovement";
 import type { MovementContext } from "../../movement/Movement";
 import type { ManualController, ManualControllerSnapshot } from "./ManualController";
@@ -30,20 +30,22 @@ export interface InsectManualControllerDeps {
 const MAX_ACTIVE = 18;
 
 /**
- * [UR-6] マウス操作モードの「虫」固有コントローラ。
+ * [UR3-4] マウス操作モードの「虫」固有コントローラ。
  *
- * クリック(タップ)した位置に虫を 1 体 spawn し、既存の {@link ErraticMovement}（不規則ダッシュ）で
- * 素早く飛び回らせ、やがて world 外へ抜けたら despawn する。連続クリックで複数を同時に出せる。
+ * クリック(タップ)すると虫を 1 体 spawn し、画面外(進入辺)からクリック位置へ素早く飛び込ませてから、
+ * 既存の {@link ErraticMovement}（不規則ダッシュ）で飛び回らせ、やがて world 外へ抜けたら despawn する。
+ * 連続クリックで複数を同時に出せる。
  *
  * active list 管理・自己修復 prune・world 退出/expired despawn は {@link CritterPopulation} へ委譲し、
  * cap/evict・spawn 計画・羽音は本コントローラ固有として残す（挙動は委譲前と不変）。
  *
- * - onPointerDown(worldX, worldY): クリック位置を始点にした {@link planErraticFromPoint} の plan で
- *   虫を spawn（Population が保持）。上限 MAX_ACTIVE で頭打ちし、超過は Population.list の最古を退場させる。
+ * - onPointerDown(worldX, worldY): クリック位置を飛び込み先(wp0)にした {@link planErraticFromOffscreen} の
+ *   plan で虫を spawn（Population が保持。position=画面外の進入辺）。上限 MAX_ACTIVE で頭打ちし、超過は
+ *   Population.list の最古を退場させる。
  * - update: Population で各虫を更新し、world 外/退場完了のものを despawn する。羽音は present-gate
  *   （虫が居る間・最大速度連動）で 1 本の {@link CritterAudioController} を駆動する（複数の羽音を
  *   個別に鳴らさず 1 本で代表。AutoMode の per-type 方式に倣う）。
- * - start: 選択直後の初期フィードバックとして中央に 1 体出す。以後はクリックで追加。
+ * - start: 選択直後の初期フィードバックとして、画面外から中央へ飛び込む虫を 1 体出す。以後はクリックで追加。
  * - setPaused: paused 中は update 早期 return（虫停止）＋羽音を silence。復帰で継続。
  * - stop: 全虫を despawn＋羽音 stop（リークなく全解放）。pointer は追従に使わないので attach しない。
  */
@@ -82,7 +84,7 @@ export class InsectManualController implements ManualController {
     this.running = true;
     this.paused = false;
     this.audioCtrl.start();
-    // 選択直後の初期フィードバック: 画面中央に 1 体出す（以後はクリックで追加）。
+    // 選択直後の初期フィードバック: 画面外から中央へ飛び込む虫を 1 体出す（以後はクリックで追加）。
     const vp = this.deps.scene.worldBounds.viewport;
     this.spawnAt(vp.width / 2, vp.height / 2);
   }
@@ -152,8 +154,8 @@ export class InsectManualController implements ManualController {
   }
 
   /**
-   * (x,y) を始点にした虫を 1 体 spawn する。上限 MAX_ACTIVE に達していれば最古(先頭)を先に退場させて
-   * 席を空ける（連打でも数が単調増加しない＝リーク防止）。
+   * (x,y) を飛び込み先(クリック位置)にした虫を 1 体 spawn する。虫は画面外の進入辺から (x,y) へ飛び込む。
+   * 上限 MAX_ACTIVE に達していれば最古(先頭)を先に退場させて席を空ける（連打でも数が単調増加しない＝リーク防止）。
    */
   private spawnAt(x: number, y: number): void {
     // cap/evict は Insect 固有。上限に達していれば Population.list の最古(先頭)を先に退場させる。
@@ -163,7 +165,7 @@ export class InsectManualController implements ManualController {
         this.population.despawn(oldest);
       }
     }
-    const plan = planErraticFromPoint(
+    const plan = planErraticFromOffscreen(
       { x, y },
       this.deps.scene.worldBounds,
       this.rng,
@@ -174,7 +176,8 @@ export class InsectManualController implements ManualController {
       typeId: INSECT_TYPE_ID,
       bodyTexture: this.deps.bodyTexture,
       movement: new ErraticMovement(plan),
-      // 始点=クリック位置。進入方向(→wp0)を初速に与え spawn 直後の heading を進行方向へ向ける。
+      // 始点=画面外の進入辺(plan.enter)。進入方向(→wp0=クリック位置)を初速に与え、spawn 直後の heading を
+      // クリック点へ飛び込む向きへ初期化する。
       spawn: {
         position: plan.enter,
         velocity: erraticEntryVelocity(plan),

@@ -328,20 +328,24 @@ export function planErraticSpawn(
 }
 
 /**
- * クリック(タップ)位置を始点にした虫の spawn を計画する純関数（[UR-6] マウス操作の虫クリック出現）。
- * {@link planErraticSpawn} が world 端(画面外)から進入させるのに対し、本関数は enter=start（＝画面内の
- * クリック位置）から始め、視界内 waypoint を素早くダッシュで巡り、最後に world 外(exit)へ抜けて despawn する。
+ * クリック(タップ)位置 target を「画面外から飛び込む」ように計画する純関数（[UR3-4] マウス操作の虫を
+ * 画面外から出現させる）。{@link planErraticSpawn} が視界内へ入る先(wp0)を rng で散らすのに対し、本関数は
+ * wp0=target に固定する＝虫はまず「進入辺(画面外)→クリック点」へ直進で飛び込み、その後は視界内 waypoint を
+ * 素早くダッシュで巡り(roam)、最後に world 外(exit)へ抜けて despawn する。
  *
- * rng 消費順（固定 8 回 + waypoint ごとに 2 回。enterEdge が無いぶん planErraticSpawn より 1 個少ない）:
- *   waypointCount, entrySec, dashSec, pauseSec, exitSec, jitterAmp, jitterFreq, jitterPhase, exitEdge,
- *   [wpX, wpY] * n
+ * rng 消費順（固定 10 回 + 2 番目以降の waypoint ごとに 2 回。先頭 10 個は planErraticSpawn と同一。
+ * waypoints[0]=target は rng を消費しない＝散らすのは残り count-1 個だけ）:
+ *   enterEdge, waypointCount, entrySec, dashSec, pauseSec, exitSec, jitterAmp, jitterFreq, jitterPhase,
+ *   exitEdge, [wpX, wpY] * (count-1)
  *
- * - enter=start はクリック位置そのまま（canvas クリックは viewport 内＝world 内なので初フレームで即 despawn しない）。
- * - waypoint は viewport の inset 内に散らす（無限遠へ飛ばさない）。
+ * - enter は enterEdge の world 端上で target と同軸＝クリック点へまっすぐ飛び込む画面外始点
+ *   （world 端は inclusive＝world 内なので初フレームで即 despawn しない。viewport 外＝画面外から現れる）。
+ * - waypoints[0]=target はクリック位置そのもの（進入辺→クリック点へ直進で飛び込む先）。
+ * - waypoints[1..] は viewport の inset 内に散らす（無限遠へ飛ばさない）。waypoints は最低 1 個(=target)を保証。
  * - exit は exitEdge の world 外へ押し出す（size に依らず必ず strictly outside＝寿命後に確実に despawn）。
  */
-export function planErraticFromPoint(
-  start: Vec2,
+export function planErraticFromOffscreen(
+  target: Vec2,
   world: WorldBounds,
   rng: () => number,
   range: ErraticSpawnRange = ERRATIC_SPAWN_DEFAULTS,
@@ -349,6 +353,7 @@ export function planErraticFromPoint(
 ): ErraticPlan {
   const { width, height } = world.viewport;
 
+  const enterEdge = pickEdge(rng());
   const span = Math.max(1, Math.round(range.waypointsMax - range.waypointsMin));
   const count = range.waypointsMin + Math.min(span, Math.floor(rng() * (span + 1)));
 
@@ -362,15 +367,17 @@ export function planErraticFromPoint(
   const exitEdge = pickEdge(rng());
 
   const inset = range.insetFrac;
-  const waypoints: Vec2[] = [];
-  for (let i = 0; i < count; i++) {
+  // waypoints[0]=target はクリック位置そのもの（rng を消費しない）。まず画面外→クリック点へ直進で飛び込み、
+  // 残り count-1 個は viewport の inset 内に散らして roam する（無限遠へ飛ばさない）。
+  const waypoints: Vec2[] = [{ x: target.x, y: target.y }];
+  for (let i = 1; i < count; i++) {
     const x = lerp(width * inset, width * (1 - inset), rng());
     const y = lerp(height * inset, height * (1 - inset), rng());
     waypoints.push({ x, y });
   }
 
-  // enter はクリック位置そのもの（画面外進入ではなく「その場から」始める）。
-  const enter = { x: start.x, y: start.y };
+  // enter は enterEdge の world 端上で target と同軸＝クリック点へまっすぐ飛び込む画面外始点。
+  const enter = edgeEnter(world, enterEdge, target);
   const exit = edgeExit(world, exitEdge, waypoints[waypoints.length - 1], size);
 
   return {
