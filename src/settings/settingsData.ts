@@ -139,12 +139,34 @@ export function normalizeHexColor(value: unknown, fallback: string): string {
 }
 
 /**
- * 音量を [0,1] に収める。数値化できない/非有限は既定音量へフォールバック。
- * （未設定 undefined は Number(undefined)=NaN 経由で既定に落ちる。）
+ * unknown を有限数へ変換する。number（有限）と数値文字列のみ受理し、
+ * それ以外（boolean/null/配列/オブジェクト/空文字/空白のみ/非数値文字列/undefined）は null を返す。
+ * clamp/normalize 各関数が型不一致を安全に既定へ落とすための共通変換。
+ * （Number() 強制だと Number(true)=1 / Number(null)=0 / Number("")=0 / Number([5])=5 のように
+ *  型不一致が数値へ化けて既定に落ちないため、ここで受理範囲を数値・数値文字列に限定する。）
+ */
+function coerceFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      return null;
+    }
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * 音量を [0,1] に収める。有限数・数値文字列のみ受理し、型不一致（boolean/null/配列/
+ * オブジェクト/空文字）・非有限・欠損(undefined)は既定音量へフォールバックする。
  */
 export function clampVolume(value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) {
+  const n = coerceFiniteNumber(value);
+  if (n === null) {
     return DEFAULT_MASTER_VOLUME;
   }
   return n < 0 ? 0 : n > 1 ? 1 : n;
@@ -189,11 +211,12 @@ export function normalizeAutoDisabledTypes(value: unknown): string[] {
 }
 
 /**
- * 出現間隔(ms)を [MIN,MAX] にクランプする。数値化できない/非有限は既定へフォールバック。
+ * 出現間隔(ms)を [MIN,MAX] にクランプする。有限数・数値文字列のみ受理し、
+ * 型不一致（boolean/null/配列/オブジェクト/空文字）・非有限・欠損は既定へフォールバックする。
  */
 export function clampSpawnInterval(value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) {
+  const n = coerceFiniteNumber(value);
+  if (n === null) {
     return DEFAULT_AUTO_SPAWN_INTERVAL_MS;
   }
   return n < MIN_AUTO_SPAWN_INTERVAL_MS
@@ -204,12 +227,13 @@ export function clampSpawnInterval(value: unknown): number {
 }
 
 /**
- * 遊びすぎ防止の上限(分)を正規化する。数値化できない/非有限/負は 0（OFF）へ。
+ * 遊びすぎ防止の上限(分)を正規化する。有限数・数値文字列のみ受理する。
+ * 型不一致（boolean/null/配列/オブジェクト/空文字）・非有限・欠損・負は 0（OFF）へ。
  * それ以外は Math.round して [0, MAX] にクランプする（UI はプリセットに制約するが永続値は堅牢に扱う）。
  */
 export function clampPlayLimitMinutes(value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n < 0) {
+  const n = coerceFiniteNumber(value);
+  if (n === null || n < 0) {
     return DEFAULT_AUTO_PLAY_LIMIT_MINUTES;
   }
   const rounded = Math.round(n);
@@ -217,12 +241,12 @@ export function clampPlayLimitMinutes(value: unknown): number {
 }
 
 /**
- * 動きの速さ倍率を正規化する。数値化して finite かつ >0 なら [MIN,MAX] にクランプ。
- * 非有限・0以下・数値化不能・欠損は既定(1.0)へフォールバックする。
+ * 動きの速さ倍率を正規化する。有限数・数値文字列のみ受理し、>0 なら [MIN,MAX] にクランプ。
+ * 型不一致（boolean/null/配列/オブジェクト/空文字）・非有限・0以下・欠損は既定(1.0)へフォールバックする。
  */
 export function normalizeSpeedScale(value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n <= 0) {
+  const n = coerceFiniteNumber(value);
+  if (n === null || n <= 0) {
     return DEFAULT_SPEED_SCALE;
   }
   return n < MIN_SPEED_SCALE ? MIN_SPEED_SCALE : n > MAX_SPEED_SCALE ? MAX_SPEED_SCALE : n;

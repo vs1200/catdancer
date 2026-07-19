@@ -79,6 +79,20 @@ describe("clampVolume", () => {
 
   it("数値文字列は解釈する", () => {
     expect(clampVolume("0.25")).toBe(0.25);
+    expect(clampVolume("2")).toBe(1);
+    expect(clampVolume("-1")).toBe(0);
+  });
+
+  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定音量へ", () => {
+    // Number() 強制だと true→1(最大音量), null/""/[]→0(無音) に化けていた回帰ケース。
+    expect(clampVolume(true)).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume(false)).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume(null)).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume("")).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume(" ")).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume([])).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume([5])).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume({})).toBe(DEFAULT_MASTER_VOLUME);
   });
 });
 
@@ -181,6 +195,18 @@ describe("clampSpawnInterval", () => {
   it("数値文字列は解釈する", () => {
     expect(clampSpawnInterval("800")).toBe(800);
   });
+
+  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定へ", () => {
+    // Number() 強制だと true→1, null/""/[]→0 が MIN(200) に張り付き spawn 頻発していた回帰ケース。
+    expect(clampSpawnInterval(true)).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval(false)).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval(null)).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval("")).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval(" ")).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval([])).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval([5])).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(clampSpawnInterval({})).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+  });
 });
 
 describe("clampPlayLimitMinutes", () => {
@@ -210,6 +236,19 @@ describe("clampPlayLimitMinutes", () => {
 
   it("数値文字列は解釈する", () => {
     expect(clampPlayLimitMinutes("15")).toBe(15);
+    expect(clampPlayLimitMinutes("10")).toBe(10);
+  });
+
+  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は 0（OFF）へ", () => {
+    // Number() 強制だと true→1(1分制限が黙ってON)、[5]→5(5分制限ON) に化けていた回帰ケース。
+    expect(clampPlayLimitMinutes(true)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(false)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(null)).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes("")).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes(" ")).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes([])).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes([5])).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(clampPlayLimitMinutes({})).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
   });
 });
 
@@ -246,6 +285,18 @@ describe("normalizeSpeedScale", () => {
 
   it("数値文字列は解釈する", () => {
     expect(normalizeSpeedScale("1.4")).toBe(1.4);
+  });
+
+  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定(1.0)へ", () => {
+    // true は Number(true)=1 で既定と偶然一致していたが、同じ型不一致受理の弱点だったため固定する。
+    expect(normalizeSpeedScale(true)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(false)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(null)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale("")).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(" ")).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale([])).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale([5])).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale({})).toBe(DEFAULT_SPEED_SCALE);
   });
 });
 
@@ -450,6 +501,21 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ speedScale: 0 }).speedScale).toBe(DEFAULT_SPEED_SCALE);
     expect(normalizeSettings({ speedScale: -2 }).speedScale).toBe(DEFAULT_SPEED_SCALE);
     expect(normalizeSettings({ speedScale: Number.NaN }).speedScale).toBe(DEFAULT_SPEED_SCALE);
+  });
+
+  it("数値フィールドの型不一致(破損/改竄 localStorage 由来)は全て既定へ正規化する", () => {
+    // 破損/改竄/旧版由来の永続値を想定。boolean/null/空文字/配列/オブジェクトが
+    // Number() 化けで誤った値（音量暴発・spawn 頻発・遊びすぎ制限の誤ON）にならないことの契約実証。
+    const s = normalizeSettings({
+      masterVolume: true,
+      autoPlayLimitMinutes: true,
+      autoSpawnIntervalMs: null,
+      speedScale: [],
+    });
+    expect(s.masterVolume).toBe(DEFAULT_MASTER_VOLUME);
+    expect(s.autoPlayLimitMinutes).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
+    expect(s.autoSpawnIntervalMs).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
+    expect(s.speedScale).toBe(DEFAULT_SPEED_SCALE);
   });
 });
 
