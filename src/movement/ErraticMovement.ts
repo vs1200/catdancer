@@ -322,3 +322,64 @@ export function planErraticSpawn(
     facing: 1,
   };
 }
+
+/**
+ * クリック(タップ)位置を始点にした虫の spawn を計画する純関数（[UR-6] マウス操作の虫クリック出現）。
+ * {@link planErraticSpawn} が world 端(画面外)から進入させるのに対し、本関数は enter=start（＝画面内の
+ * クリック位置）から始め、視界内 waypoint を素早くダッシュで巡り、最後に world 外(exit)へ抜けて despawn する。
+ *
+ * rng 消費順（固定 8 回 + waypoint ごとに 2 回。enterEdge が無いぶん planErraticSpawn より 1 個少ない）:
+ *   waypointCount, entrySec, dashSec, pauseSec, exitSec, jitterAmp, jitterFreq, jitterPhase, exitEdge,
+ *   [wpX, wpY] * n
+ *
+ * - enter=start はクリック位置そのまま（canvas クリックは viewport 内＝world 内なので初フレームで即 despawn しない）。
+ * - waypoint は viewport の inset 内に散らす（無限遠へ飛ばさない）。
+ * - exit は exitEdge の world 外へ押し出す（size に依らず必ず strictly outside＝寿命後に確実に despawn）。
+ */
+export function planErraticFromPoint(
+  start: Vec2,
+  world: WorldBounds,
+  rng: () => number,
+  range: ErraticSpawnRange = ERRATIC_SPAWN_DEFAULTS,
+  size = 0,
+): ErraticPlan {
+  const { width, height } = world.viewport;
+
+  const span = Math.max(1, Math.round(range.waypointsMax - range.waypointsMin));
+  const count = range.waypointsMin + Math.min(span, Math.floor(rng() * (span + 1)));
+
+  const entrySec = lerp(range.entrySecMin, range.entrySecMax, rng());
+  const dashSec = lerp(range.dashSecMin, range.dashSecMax, rng());
+  const pauseSec = lerp(range.pauseSecMin, range.pauseSecMax, rng());
+  const exitSec = lerp(range.exitSecMin, range.exitSecMax, rng());
+  const jitterAmp = lerp(range.jitterAmpMin, range.jitterAmpMax, rng());
+  const jitterFreq = lerp(range.jitterFreqMin, range.jitterFreqMax, rng());
+  const jitterPhase = rng() * Math.PI * 2;
+  const exitEdge = pickEdge(rng());
+
+  const inset = range.insetFrac;
+  const waypoints: Vec2[] = [];
+  for (let i = 0; i < count; i++) {
+    const x = lerp(width * inset, width * (1 - inset), rng());
+    const y = lerp(height * inset, height * (1 - inset), rng());
+    waypoints.push({ x, y });
+  }
+
+  // enter はクリック位置そのもの（画面外進入ではなく「その場から」始める）。
+  const enter = { x: start.x, y: start.y };
+  const exit = edgeExit(world, exitEdge, waypoints[waypoints.length - 1], size);
+
+  return {
+    enter,
+    waypoints,
+    exit,
+    entrySec,
+    dashSec,
+    pauseSec,
+    exitSec,
+    jitterAmp,
+    jitterFreq,
+    jitterPhase,
+    facing: 1,
+  };
+}

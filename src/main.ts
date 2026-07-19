@@ -34,6 +34,7 @@ import { ManualMode } from "./modes/ManualMode";
 import type { Mode } from "./modes/Mode";
 import { FollowManualController } from "./modes/manual/FollowManualController";
 import { FoxtailManualController } from "./modes/manual/FoxtailManualController";
+import { InsectManualController } from "./modes/manual/InsectManualController";
 import type { ManualControllerFactory } from "./modes/manual/ManualController";
 import { PlayLimitTimer } from "./modes/PlayLimitTimer";
 import { getCritterImage } from "./settings/imageStore";
@@ -159,7 +160,17 @@ async function bootstrap(): Promise<void> {
         }),
     ],
     [TOYS_TYPE_ID, makeFollowFactory(TOYS_TYPE_ID, toysTexture)],
-    [INSECT_TYPE_ID, makeFollowFactory(INSECT_TYPE_ID, insectTexture)],
+    // [UR-6] 虫だけは固有挙動（クリックした位置に出現・複数同時・素早いダッシュで動き回り world 外へ退場）
+    // へ差し替える。他種別（ネズミ/おもちゃ）は従来どおりカーソル追従(FollowManualController)のまま。
+    [
+      INSECT_TYPE_ID,
+      () =>
+        new InsectManualController({
+          bodyTexture: insectTexture,
+          audio,
+          scene,
+        }),
+    ],
   ]);
   const manualMode = new ManualMode({
     factories: manualFactories,

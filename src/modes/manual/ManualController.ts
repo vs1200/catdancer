@@ -36,6 +36,11 @@ export interface ManualControllerSnapshot {
   retract?: number;
   base?: { x: number; y: number };
   headRender?: { x: number; y: number };
+  /**
+   * [UR-6] 虫コントローラ固有の観測値（他コントローラでは未設定＝optional・QA 用）。
+   * 現在アクティブな虫の総数（クリック出現/複数/cap/despawn 減少の検証）。
+   */
+  insectCount?: number;
 }
 
 /** 操作対象 1 種別ぶんの manual 挙動。 */
