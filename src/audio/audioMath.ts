@@ -29,10 +29,12 @@ export const SCURRY_LEVEL_DEFAULTS = {
  * ポインタ追従ネズミ（ManualMode）の走行音写像。
  * MouseFollowMovement はピーク速度が大きい(~6480, [UR-8]で上方調整)ため、既定 maxSpeed=480 では即飽和して抑揚が
  * 出ない。maxSpeed を上方調整して「速いほど活発」の抑揚が残るようにする。
+ * [UR-3] 走行音を実録サンプルへ差し替えるのに合わせ、旧値 1500 では新ピーク(~6480)前提で飽和寄りだったため
+ * maxSpeed をピークの約半分(3000)へ引き上げる。通常追従は中程度、素早いフリックで飽和という自然な抑揚にする。
  */
 export const SCURRY_LEVEL_MOUSE_FOLLOW = {
   minSpeed: 15,
-  maxSpeed: 1500,
+  maxSpeed: 3000,
 } as const satisfies ScurryLevelOptions;
 
 /**
@@ -138,4 +140,21 @@ export function makeSqueakParams(
   const gainPeak = 0.32 + 0.12 * rng();
 
   return { waveform, startFreq, peakFreq, endFreq, duration, peakTime, gainPeak };
+}
+
+/**
+ * サンプル集合から 1 つ選ぶための [0,length) 一様乱数インデックスを返す純関数（rng 注入でテスト可能）。
+ * ネズミの走行音/鳴き声を「再生のたび（走行はループ周回のたび）3種からランダム選択」する土台。
+ * length<=1 は常に 0（唯一/空集合で安全）。rng が [0,1) 外/NaN でも範囲内に丸め、必ず有効な index を返す。
+ * rng は [0,1) を返す関数（既定 Math.random）。
+ */
+export function pickRandomIndex(length: number, rng: () => number = Math.random): number {
+  if (!(length > 1)) {
+    return 0;
+  }
+  const r = rng();
+  // NaN/範囲外を [0,1) に丸める（1 以上は最終 index に落とすため 1 未満へクランプ）。
+  const safe = Number.isFinite(r) ? (r < 0 ? 0 : r >= 1 ? 0.999999999 : r) : 0;
+  const idx = Math.floor(safe * length);
+  return idx < 0 ? 0 : idx >= length ? length - 1 : idx;
 }

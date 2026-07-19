@@ -1,4 +1,4 @@
-import { clamp01 } from "./audioMath";
+import { clamp01, pickRandomIndex } from "./audioMath";
 import type { AudioEngine, LoopVoice } from "./synth";
 
 /**
@@ -47,6 +47,15 @@ const DEFAULT_MASTER_VOLUME = 0.5;
 const DEFAULT_FFT_SIZE = 1024;
 /** master 音量変更の平滑化時定数(秒)。 */
 const MASTER_SMOOTH_TAU = 0.02;
+/**
+ * サンプル・ワンショット（鳴き声）を master 前で通す固定 gain。素材は -3dBFS 正規化済みで、
+ * そのままだと合成SEより大きいため少し抑えて他SEと音量感を揃える。
+ */
+const SAMPLE_ONESHOT_GAIN = 0.8;
+/** サンプル走行ループの level(0..1)→実 gain の最大値（合成 scurry の SCURRY_MAX_GAIN と揃える）。 */
+const SAMPLE_LOOP_MAX_GAIN = 0.7;
+/** サンプル走行ループの level 追従時定数(秒)。合成 scurry と同じく段差なく滑らかに追う。 */
+const SAMPLE_LOOP_SMOOTH_TAU = 0.05;
 
 /** 何もしないループ声部（無効時のフォールバック。呼び出し側は常に安全）。 */
 const NULL_LOOP: LoopVoice = {
@@ -74,6 +83,11 @@ export class AudioManager implements AudioSink {
   private readonly timeData: Float32Array<ArrayBuffer> | null;
   private readonly oneShots = new Map<string, OneShotBuilder>();
   private readonly loops = new Map<string, LoopBuilder>();
+  // サンプル音源バンク（実録WAVの decode 済み AudioBuffer 集合）。登録があれば同 id の合成ビルダより優先する。
+  private readonly oneShotSamples = new Map<string, AudioBuffer[]>();
+  private readonly loopSamples = new Map<string, AudioBuffer[]>();
+  // id ごとに最後に選ばれたサンプル index（DEV 検証: ランダム選択が複数種に散るかの観測用）。
+  private readonly lastSampleIndex = new Map<string, number>();
   private masterVolumeValue: number;
   private mutedValue: boolean;
   private resumeAttached = false;
@@ -213,6 +227,60 @@ export class AudioManager implements AudioSink {
     this.loops.set(id, builder);
   }
 
+  /**
+   * fetch 済みバイト列を decodeAudioData で AudioBuffer 化する（fetch は呼び出し側が担う）。
+   * context は suspended でも decode 可能。context 未生成/decode 失敗時は null を返すので、
+   * 呼び出し側は「登録しない＝合成SEをフォールバックのまま残す」ことで無音化を避けられる。
+   */
+  async decodeSample(bytes: ArrayBuffer): Promise<AudioBuffer | null> {
+    if (!this.ctx) {
+      return null;
+    }
+    try {
+      return await this.ctx.decodeAudioData(bytes);
+    } catch (error) {
+      console.warn("音声サンプルの decode に失敗しました。", error);
+      return null;
+    }
+  }
+
+  /**
+   * ワンショットSEをサンプル集合で登録する（playOneShot が発火のたびランダムに 1 つ選ぶ）。
+   * 空配列は無視する（＝登録されず、同 id の合成ビルダがそのままフォールバックとして残る）。
+   */
+  registerOneShotSamples(id: string, buffers: AudioBuffer[]): void {
+    if (buffers.length > 0) {
+      this.oneShotSamples.set(id, buffers);
+    }
+  }
+
+  /**
+   * ループSE(走行音)をサンプル集合で登録する（createLoop が周回ごとにランダムに選び直す）。
+   * 空配列は無視する（＝同 id の合成ループビルダがフォールバックとして残る）。
+   */
+  registerLoopSamples(id: string, buffers: AudioBuffer[]): void {
+    if (buffers.length > 0) {
+      this.loopSamples.set(id, buffers);
+    }
+  }
+
+  /** DEV 検証用: 登録済みサンプルの id→各バッファ duration(秒) 一覧（decode 成功と長さの客観確認）。 */
+  sampleInfo(): Record<string, number[]> {
+    const info: Record<string, number[]> = {};
+    for (const [id, bufs] of this.oneShotSamples) {
+      info[id] = bufs.map((b) => b.duration);
+    }
+    for (const [id, bufs] of this.loopSamples) {
+      info[id] = bufs.map((b) => b.duration);
+    }
+    return info;
+  }
+
+  /** id で最後に再生したサンプルの index。未再生/非サンプル id は null（DEV 検証用）。 */
+  getLastSampleIndex(id: string): number | null {
+    return this.lastSampleIndex.get(id) ?? null;
+  }
+
   private engine(): AudioEngine | null {
     if (!this.ctx || !this.master) {
       return null;
@@ -234,21 +302,30 @@ export class AudioManager implements AudioSink {
     if (!engine) {
       return;
     }
+    const samples = this.oneShotSamples.get(id);
     const builder = this.oneShots.get(id);
-    if (!builder) {
+    if (!samples && !builder) {
       return;
     }
+    // サンプル登録があれば合成ビルダより優先（同 id で実録サンプルへ差し替え）。無ければ合成フォールバック。
+    const fire = (): void => {
+      if (samples) {
+        this.fireSampleOneShot(samples, engine, id);
+      } else if (builder) {
+        this.fireOneShot(builder, engine, id);
+      }
+    };
     const state = this.ctx?.state;
     if (state === "running") {
       // running 経路は同期で即発火（既存挙動を変えない）。
-      this.fireOneShot(builder, engine, id);
+      fire();
       return;
     }
     if (state === "suspended") {
       // 初回ジェスチャ起点: resume が成功して running になった時だけ遅延発火する。
       void this.resume().then(() => {
         if (this.ctx?.state === "running") {
-          this.fireOneShot(builder, engine, id);
+          fire();
         }
       });
     }
@@ -265,13 +342,51 @@ export class AudioManager implements AudioSink {
   }
 
   /**
+   * サンプル集合からランダムに 1 つ選び、AudioBufferSourceNode で 1 発再生する。
+   * 固定 gain(SAMPLE_ONESHOT_GAIN) を挟んでから master(→analyser→destination) へ出す（muted/volume を尊重）。
+   * 終了後 onended で全ノードを切断しリークさせない。失敗は警告のみで握りつぶす。
+   */
+  private fireSampleOneShot(buffers: AudioBuffer[], engine: AudioEngine, id: string): void {
+    try {
+      const index = pickRandomIndex(buffers.length);
+      this.lastSampleIndex.set(id, index);
+      const src = engine.context.createBufferSource();
+      src.buffer = buffers[index];
+      const gain = engine.context.createGain();
+      gain.gain.value = SAMPLE_ONESHOT_GAIN;
+      src.connect(gain);
+      gain.connect(engine.output);
+      src.onended = (): void => {
+        src.disconnect();
+        gain.disconnect();
+      };
+      src.start();
+    } catch (error) {
+      console.warn(`サンプルSE 再生に失敗しました: ${id}`, error);
+    }
+  }
+
+  /**
    * ループSE声部を生成。未生成/未登録/生成失敗なら無音のダミーを返すので、
    * 呼び出し側は返り値の null チェック不要で常に安全に setLevel/stop できる。
    */
   createLoop(id: string): LoopVoice {
     const engine = this.engine();
+    if (!engine) {
+      return NULL_LOOP;
+    }
+    // サンプル走行音の登録があれば合成ループより優先（同 id で実録サンプルへ差し替え）。
+    const samples = this.loopSamples.get(id);
+    if (samples) {
+      try {
+        return this.createSampleLoopVoice(samples, engine, id);
+      } catch (error) {
+        console.warn(`サンプルループSE 生成に失敗しました: ${id}`, error);
+        return NULL_LOOP;
+      }
+    }
     const builder = this.loops.get(id);
-    if (!engine || !builder) {
+    if (!builder) {
       return NULL_LOOP;
     }
     try {
@@ -280,6 +395,76 @@ export class AudioManager implements AudioSink {
       console.warn(`ループSE 生成に失敗しました: ${id}`, error);
       return NULL_LOOP;
     }
+  }
+
+  /**
+   * サンプル走行音のループ声部を生成する（LoopVoice 互換）。run バッファ集合を 1 クリップずつ再生し、
+   * 周回（onended）ごとにランダムで選び直して単調さを避ける（＝走行音も 3 種からランダム/周回で変化）。
+   * level→gain は setTargetAtTime で平滑追従（setLevel(0) で無音へ収束）、stop で現行 source と gain を切断。
+   * present-gate（不在/pause 時の setLevel(0)/silence/stop）は既存経路のまま効く。gain 0 の間もチェーンは
+   * 裏で回り続けるが無音・軽量（同時に走る source は常に 1 本）。
+   */
+  private createSampleLoopVoice(
+    buffers: AudioBuffer[],
+    engine: AudioEngine,
+    id: string,
+  ): LoopVoice {
+    const { context, output } = engine;
+    const level = context.createGain();
+    level.gain.value = 0;
+    level.connect(output);
+
+    let stopped = false;
+    let current: AudioBufferSourceNode | null = null;
+
+    const playNext = (): void => {
+      if (stopped) {
+        return;
+      }
+      const index = pickRandomIndex(buffers.length);
+      this.lastSampleIndex.set(id, index);
+      const src = context.createBufferSource();
+      src.buffer = buffers[index];
+      src.connect(level);
+      src.onended = (): void => {
+        src.disconnect();
+        // 停止していなければ次のクリップへ（周回のたびランダムに選び直す）。
+        if (!stopped && current === src) {
+          playNext();
+        }
+      };
+      current = src;
+      src.start();
+    };
+    playNext();
+
+    return {
+      setLevel(value: number): void {
+        if (stopped) {
+          return;
+        }
+        const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
+        level.gain.setTargetAtTime(
+          clamped * SAMPLE_LOOP_MAX_GAIN,
+          context.currentTime,
+          SAMPLE_LOOP_SMOOTH_TAU,
+        );
+      },
+      stop(): void {
+        if (stopped) {
+          return;
+        }
+        stopped = true;
+        try {
+          current?.stop();
+        } catch {
+          // 既に停止済みでも問題なし。
+        }
+        current?.disconnect();
+        current = null;
+        level.disconnect();
+      },
+    };
   }
 
   /** master 出力の RMS(0..1目安)。debug/検証フック用（ヘッドレスで音を客観確認する）。 */

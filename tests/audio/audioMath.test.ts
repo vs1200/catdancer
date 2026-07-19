@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clamp01,
   makeSqueakParams,
+  pickRandomIndex,
   SCURRY_LEVEL_DEFAULTS,
   scurryLevelFromSpeed,
 } from "../../src/audio/audioMath";
@@ -115,5 +116,54 @@ describe("makeSqueakParams", () => {
     const p = makeSqueakParams(() => 0.5, { baseFreq: 800, freqJitter: 0, baseDuration: 0.2 });
     expect(p.startFreq).toBeCloseTo(800, 6); // jitter=0 かつ rng=0.5 → 揺らぎ 0
     expect(p.duration).toBeGreaterThan(0);
+  });
+});
+
+describe("pickRandomIndex", () => {
+  it("rng を [0,1) 全域で振ると 0..length-1 を一様にカバーする", () => {
+    const length = 3;
+    // 各バケット中央付近を狙う rng で、想定 index に落ちることを確認（境界含む）。
+    expect(pickRandomIndex(length, () => 0)).toBe(0);
+    expect(pickRandomIndex(length, () => 0.2)).toBe(0);
+    expect(pickRandomIndex(length, () => 0.34)).toBe(1);
+    expect(pickRandomIndex(length, () => 0.5)).toBe(1);
+    expect(pickRandomIndex(length, () => 0.67)).toBe(2);
+    expect(pickRandomIndex(length, () => 0.999999)).toBe(2);
+  });
+
+  it("常に [0,length) の整数を返す（多数の rng 値で範囲外に出ない）", () => {
+    const length = 3;
+    for (const r of [0, 0.1, 0.333, 0.5, 0.9, 0.9999999]) {
+      const idx = pickRandomIndex(length, () => r);
+      expect(Number.isInteger(idx)).toBe(true);
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(idx).toBeLessThan(length);
+    }
+  });
+
+  it("length<=1 は常に 0（唯一/空集合で安全）", () => {
+    expect(pickRandomIndex(1, () => 0.9)).toBe(0);
+    expect(pickRandomIndex(0, () => 0.9)).toBe(0);
+    expect(pickRandomIndex(-3, () => 0.9)).toBe(0);
+  });
+
+  it("rng が範囲外/NaN でも範囲内に丸める（gain/index の暴走防止）", () => {
+    const length = 3;
+    // r>=1 は最終 index、r<0 は 0、NaN は 0 に落とす。
+    expect(pickRandomIndex(length, () => 1)).toBe(length - 1);
+    expect(pickRandomIndex(length, () => 1.5)).toBe(length - 1);
+    expect(pickRandomIndex(length, () => -0.5)).toBe(0);
+    expect(pickRandomIndex(length, () => Number.NaN)).toBe(0);
+  });
+
+  it("実 Math.random でも常に有効 index（統計: 3種すべて出現する）", () => {
+    const seen = new Set<number>();
+    for (let i = 0; i < 300; i++) {
+      const idx = pickRandomIndex(3);
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(idx).toBeLessThan(3);
+      seen.add(idx);
+    }
+    expect(seen.size).toBe(3);
   });
 });
