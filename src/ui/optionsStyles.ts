@@ -53,28 +53,32 @@ const CSS = `
   position: fixed;
   inset: 0;
   display: none;
-  /* 透明な背面クリックキャッチャ。背後のアニメ/猫の視界は遮らない。 */
-  background: transparent;
+  /* モーダルの薄暗幕（外側クリックで閉じる）。設定中は現行モードを pause するため猫視界は不問。 */
+  background: rgba(8, 10, 14, 0.5);
   z-index: ${OVERLAY_Z_INDEX};
 }
 .cd-options-overlay.cd-open {
-  display: block;
+  /* 中央寄せのモーダル配置。padding で狭幅でもカードに余白を確保する。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 16px;
 }
 
 .cd-options-panel {
-  position: fixed;
-  right: 16px;
-  bottom: 72px;
+  position: relative;
   box-sizing: border-box;
-  width: min(320px, calc(100vw - 32px));
-  max-height: calc(100vh - 96px);
+  /* 大きめポップアップ。狭幅は 100vw-32px（overlay padding 16px×2）に収めて横スクロールを出さない。 */
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(85vh, calc(100vh - 32px));
   overflow-y: auto;
-  padding: 16px 18px 18px;
-  border-radius: 14px;
+  padding: 20px 24px 24px;
+  border-radius: 16px;
   /* 半透明の濃色カード＋明色テキストで任意背景でも可読。 */
-  background: rgba(24, 26, 32, 0.92);
+  background: rgba(24, 26, 32, 0.94);
   color: #f4f4f6;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -111,11 +115,53 @@ const CSS = `
   color: #fff;
 }
 
-.cd-options-section {
-  margin-top: 14px;
+/* --- タブ（共通/マウスモード/動画モード） --- */
+.cd-options-tablist {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
-.cd-options-section:first-of-type {
-  margin-top: 0;
+.cd-options-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #a7abb6;
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cd-options-tab:hover {
+  color: #e8e9ee;
+  background: rgba(255, 255, 255, 0.05);
+}
+.cd-options-tab[aria-selected="true"] {
+  color: #fff;
+  border-bottom-color: #7cc4ff;
+}
+.cd-options-tab:focus-visible {
+  outline: 2px solid #7cc4ff;
+  outline-offset: 2px;
+}
+
+/* タブパネル。広幅では複数列、狭幅では 1 列へ自動で畳む（横スクロールを出さない）。 */
+.cd-options-tabpanel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 4px 28px;
+  align-items: start;
+}
+.cd-options-tabpanel[hidden] {
+  display: none;
+}
+
+.cd-options-section {
+  margin: 0 0 12px;
 }
 .cd-options-section-title {
   margin: 0 0 8px;
@@ -156,14 +202,6 @@ const CSS = `
 .cd-options-select:focus-visible {
   outline: 2px solid #7cc4ff;
   outline-offset: 1px;
-}
-
-/* 無効化した行（例: manual モード時の出現間隔）は淡色＋操作不可にする。 */
-.cd-options-row-disabled {
-  opacity: 0.45;
-}
-.cd-options-row-disabled input[type="range"] {
-  cursor: not-allowed;
 }
 
 .cd-options-panel input[type="color"] {
@@ -232,10 +270,6 @@ const CSS = `
   flex: 1 1 0;
   width: auto;
   padding: 7px 8px;
-}
-/* 無効化行（manual モード）のプリセットボタンは操作不可を明示する（range と同じ流儀）。 */
-.cd-options-row-disabled .cd-options-secondary {
-  cursor: not-allowed;
 }
 
 /* file input は視覚的に隠すが DOM 上には残す（自動化アップロード対象になれるように）。 */

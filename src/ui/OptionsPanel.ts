@@ -17,23 +17,25 @@ import {
   toggleAppFullscreen,
 } from "./fullscreen";
 import { ensureOptionsStyles } from "./optionsStyles";
+import { OPTIONS_TABS, tabKeyTarget } from "./optionsTabs";
 import { sliderToVolume, volumeToSlider } from "./volumeScale";
 
 /**
- * 設定パネル（DOM オーバーレイ）。右下ボタンから開閉し、モード（マウス操作/猫用動画）・
- * 出現間隔・背景（色/画像）・音量を設定する。
+ * 設定パネル（DOM オーバーレイ）。右下ボタンから開閉し、中央寄せの大きめポップアップ
+ * （モーダル）で表示する。設定は「共通 / マウスモード / 動画モード」の 3 タブに整理する。
  *
  * 責務:
- * - コントロール（select / range / color / file / reset）→ SettingsStore の公開 API を呼ぶ。
+ * - コントロール（select / range / color / file / reset / checkbox）→ SettingsStore の公開 API を呼ぶ。
  *   音量は settings.setMasterVolume、モードは setMode、出現間隔は setAutoSpawnInterval 経由で
  *   永続化され、main.ts の購読が AudioManager / モード切替へ実配線する。
- * - 現在値の反映と外部変更への追従: settings.subscribe でコントロールを同期する
- *   （出現間隔は auto モードのみ有効化）。
- * - 閉じる導線を 3 系統用意: ×ボタン / Esc / パネル外（透明バックドロップ）クリック。
+ * - 現在値の反映と外部変更への追従: settings.subscribe でコントロールを同期する（syncFromSettings）。
+ * - タブ切替: ヘッダ直下の 3 タブボタン（role="tab"）で対応 tabpanel のみ表示する。各タブの
+ *   コントロールは常時編集可（モード別 disabled は撤廃。別モードの設定も事前調整できる）。
+ * - 閉じる導線を 3 系統用意: ×ボタン / Esc / パネル外（バックドロップ）クリック。
  * - 開閉は onOpenChange で通知（main.ts が現行モードの一時停止等に使う）。
  *
- * イベント分離: バックドロップ（透明）は背後の描画を遮らず、猫は開いている間もアニメを見られる。
- * カード上の pointerdown は stopPropagation してバックドロップの外側クリック判定に漏らさない。
+ * イベント分離: バックドロップの外側 pointerdown で閉じる。カード上の pointerdown は
+ * stopPropagation してバックドロップの外側クリック判定に漏らさない。
  */
 
 /** カスタム画像クリッターの受理サイズ上限(bytes, ~8MB)。過大画像で IDB/描画を詰まらせない。 */
@@ -55,6 +57,17 @@ const ACCEPTED_IMAGE_ACCEPT = ACCEPTED_IMAGE_MIME_TYPES.join(",");
  */
 function isRejectedImageType(type: string): boolean {
   return type !== "" && !ACCEPTED_IMAGE_MIME_TYPES.includes(type);
+}
+
+/** タイトル付きセクション（h3 見出し＋中身）を作る小ヘルパ。タブ内の小見出しに使う。 */
+function createSection(title: string): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "cd-options-section";
+  const heading = document.createElement("h3");
+  heading.className = "cd-options-section-title";
+  heading.textContent = title;
+  section.appendChild(heading);
+  return section;
 }
 
 /** auto モードでトグルできる種別（id と表示名）。「出現する種類」チェックボックスに使う。 */
@@ -88,24 +101,16 @@ export class OptionsPanel {
   private readonly closeButton: HTMLButtonElement;
   /** 全画面トグルボタン。Fullscreen API 未対応ブラウザでは行を生成しないため null。 */
   private readonly fullscreenButton: HTMLButtonElement | null;
-  /** マウスカーソル非表示モードのチェックボックス（「表示」セクション）。 */
+  /** マウスカーソル非表示モードのチェックボックス（共通タブ「表示」）。 */
   private readonly hideCursorInput: HTMLInputElement;
   private readonly modeSelect: HTMLSelectElement;
-  /** [UR-4] 操作するもの select（manual モードのみ有効。auto では淡色化＋無効化）。 */
+  /** [UR-4] 操作するもの select（マウスモードタブ。常時編集可）。 */
   private readonly manualTypeSelect: HTMLSelectElement;
-  /** 操作するもの行（manual モードのみ有効。auto では行ごと淡色化）。 */
-  private readonly manualTypeRow: HTMLDivElement;
-  /** 動きの速さ select（manual/auto 両モードに効くため常時有効）。 */
+  /** 動きの速さ select（共通タブ。manual/auto 両モードに効く）。 */
   private readonly speedSelect: HTMLSelectElement;
-  /** 出現プリセット行（auto モードのみ有効。manual では presetRow ごと淡色化＋ボタン無効化）。 */
-  private readonly presetRow: HTMLDivElement;
-  /** 出現プリセットボタン群（manual モードで一括 disabled にする）。 */
-  private readonly presetButtons: HTMLButtonElement[] = [];
   private readonly intervalInput: HTMLInputElement;
   private readonly intervalValue: HTMLSpanElement;
-  private readonly intervalRow: HTMLDivElement;
   private readonly playLimitSelect: HTMLSelectElement;
-  private readonly playLimitRow: HTMLDivElement;
   private readonly colorInput: HTMLInputElement;
   private readonly fileInput: HTMLInputElement;
   private readonly critterFileInput: HTMLInputElement;
@@ -114,6 +119,13 @@ export class OptionsPanel {
   private readonly muteInput: HTMLInputElement;
   /** 「出現する種類」チェックボックス（種別 id と input のペア）。 */
   private readonly autoTypeChecks: Array<{ id: string; input: HTMLInputElement }> = [];
+
+  /** タブボタン群（OPTIONS_TABS と同順）。aria-selected / roving tabindex を切り替える。 */
+  private readonly tabButtons: HTMLButtonElement[] = [];
+  /** タブパネル群（OPTIONS_TABS と同順）。非選択は hidden にする。 */
+  private readonly tabPanels: HTMLElement[] = [];
+  /** 選択中タブのインデックス（初期 0＝共通）。 */
+  private activeTabIndex = 0;
 
   private readonly unsubscribe: () => void;
   private open = false;
@@ -124,13 +136,13 @@ export class OptionsPanel {
     this.audio = options.audio;
     this.onOpenChange = options.onOpenChange;
 
-    // --- バックドロップ（透明・外側クリックで閉じる） ---
+    // --- バックドロップ（外側クリックで閉じる。モーダルの薄暗幕） ---
     const overlay = document.createElement("div");
     overlay.className = "cd-options-overlay";
     // 外側 pointerdown で閉じる（click でなく pointerdown: スライダのドラッグ終了が外側でも誤閉じしない）。
     overlay.addEventListener("pointerdown", () => this.close());
 
-    // --- カード本体 ---
+    // --- カード本体（中央寄せの大きめポップアップ） ---
     const card = document.createElement("div");
     card.className = "cd-options-panel";
     card.setAttribute("role", "dialog");
@@ -154,59 +166,11 @@ export class OptionsPanel {
     closeButton.addEventListener("click", () => this.close());
     header.append(title, closeButton);
 
-    // --- 表示セクション（マウスカーソル非表示 + 全画面トグル） ---
-    // カーソル非表示トグルは常時提供する。全画面ボタンは Fullscreen API 対応時のみ足す
-    // （未対応環境で死んだボタンを出さない）。
-    const displaySection = document.createElement("section");
-    displaySection.className = "cd-options-section";
-    const displayTitle = document.createElement("h3");
-    displayTitle.className = "cd-options-section-title";
-    displayTitle.textContent = "表示";
-    displaySection.appendChild(displayTitle);
+    // =========================================================================
+    // コントロール生成（配線は従来どおり。タブ割り当ては下部の「タブ組み立て」で行う）。
+    // =========================================================================
 
-    // マウスカーソルを隠す（猫が物理カーソルを追う誤作動を防ぐ）。歯車付近・パネル表示中は
-    // main.ts 側で通常表示に戻す。change → settings.setHideCursor（永続化＋購読で実配線）。
-    const hideCursorRow = document.createElement("div");
-    hideCursorRow.className = "cd-options-row";
-    const hideCursorLabel = document.createElement("label");
-    hideCursorLabel.className = "cd-options-label";
-    hideCursorLabel.textContent = "マウスカーソルを隠す";
-    hideCursorLabel.htmlFor = "cd-hide-cursor-input";
-    const hideCursorInput = document.createElement("input");
-    hideCursorInput.type = "checkbox";
-    hideCursorInput.id = "cd-hide-cursor-input";
-    hideCursorInput.className = "cd-options-checkbox";
-    hideCursorInput.addEventListener("change", () => {
-      this.settings.setHideCursor(hideCursorInput.checked);
-    });
-    hideCursorRow.append(hideCursorLabel, hideCursorInput);
-    displaySection.appendChild(hideCursorRow);
-
-    // 全画面トグル（Fullscreen API 未対応環境ではボタンを生成しない）。
-    let fullscreenButton: HTMLButtonElement | null = null;
-    if (isFullscreenSupported()) {
-      const fullscreenRow = document.createElement("div");
-      fullscreenRow.className = "cd-options-row";
-      fullscreenButton = document.createElement("button");
-      fullscreenButton.type = "button";
-      fullscreenButton.className = "cd-options-secondary";
-      // ラベル/aria は syncFullscreen() で現在の全画面状態に同期する（初期反映も同メソッド）。
-      fullscreenButton.addEventListener("click", () => {
-        void toggleAppFullscreen();
-      });
-      fullscreenRow.appendChild(fullscreenButton);
-      displaySection.appendChild(fullscreenRow);
-    }
-
-    // --- モードセクション ---
-    const modeSection = document.createElement("section");
-    modeSection.className = "cd-options-section";
-    const modeTitle = document.createElement("h3");
-    modeTitle.className = "cd-options-section-title";
-    modeTitle.textContent = "モード";
-    modeSection.appendChild(modeTitle);
-
-    // モード切替（マウス操作 / 猫用動画）
+    // --- モード切替（マウス操作 / 猫用動画）。共通タブへ。 ---
     const modeRow = document.createElement("div");
     modeRow.className = "cd-options-row";
     const modeLabel = document.createElement("label");
@@ -228,7 +192,28 @@ export class OptionsPanel {
     });
     modeRow.append(modeLabel, modeSelect);
 
-    // [UR-4] 操作するもの（マウス操作モードで追従させる種別）。manual のみ有効・auto では淡色化。
+    // 動きの速さ（manual/auto 両モードに効くため共通タブ）。change → settings.setSpeedScale。
+    const speedRow = document.createElement("div");
+    speedRow.className = "cd-options-row";
+    const speedLabel = document.createElement("label");
+    speedLabel.className = "cd-options-label";
+    speedLabel.textContent = "動きの速さ";
+    speedLabel.htmlFor = "cd-speed-select";
+    const speedSelect = document.createElement("select");
+    speedSelect.id = "cd-speed-select";
+    speedSelect.className = "cd-options-select";
+    for (const opt of SPEED_SCALE_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = String(opt.value);
+      option.textContent = opt.label;
+      speedSelect.appendChild(option);
+    }
+    speedSelect.addEventListener("change", () => {
+      this.settings.setSpeedScale(Number(speedSelect.value));
+    });
+    speedRow.append(speedLabel, speedSelect);
+
+    // [UR-4] 操作するもの（マウス操作モードで追従させる種別）。マウスモードタブへ。常時編集可。
     // change → settings.setManualTypeId（永続化＋購読で manualMode.setManualType へ実配線）。
     const manualTypeRow = document.createElement("div");
     manualTypeRow.className = "cd-options-row";
@@ -250,31 +235,9 @@ export class OptionsPanel {
     });
     manualTypeRow.append(manualTypeLabel, manualTypeSelect);
 
-    // 動きの速さ（manual/auto 両モードに効くため常時有効。出現間隔のように disabled にしない）。
-    // change → settings.setSpeedScale。syncSpeed で現在値を最近傍プリセットへ復元する。
-    const speedRow = document.createElement("div");
-    speedRow.className = "cd-options-row";
-    const speedLabel = document.createElement("label");
-    speedLabel.className = "cd-options-label";
-    speedLabel.textContent = "動きの速さ";
-    speedLabel.htmlFor = "cd-speed-select";
-    const speedSelect = document.createElement("select");
-    speedSelect.id = "cd-speed-select";
-    speedSelect.className = "cd-options-select";
-    for (const opt of SPEED_SCALE_OPTIONS) {
-      const option = document.createElement("option");
-      option.value = String(opt.value);
-      option.textContent = opt.label;
-      speedSelect.appendChild(option);
-    }
-    speedSelect.addEventListener("change", () => {
-      this.settings.setSpeedScale(Number(speedSelect.value));
-    });
-    speedRow.append(speedLabel, speedSelect);
-
-    // 出現プリセット（auto モードのみ有効）。出現間隔＋出現する種類をワンタップで束ねて切り替える。
-    // ボタン click → settings.applySpawnPreset。適用後は syncFromSettings 経由で interval スライダ表示・
-    // 「出現する種類」チェックが新しい値へ自動追従する（applySpawnPreset の通知で syncFromSettings が走る）。
+    // 出現プリセット（動画モードタブ）。出現間隔＋出現する種類をワンタップで束ねて切り替える。
+    // click → settings.applySpawnPreset。適用後は syncFromSettings 経由で interval スライダ表示・
+    // 「出現する種類」チェックが新しい値へ自動追従する。
     const presetRow = document.createElement("div");
     presetRow.className = "cd-options-row";
     const presetLabel = document.createElement("span");
@@ -291,11 +254,10 @@ export class OptionsPanel {
         this.settings.applySpawnPreset(preset);
       });
       presetGroup.appendChild(presetButton);
-      this.presetButtons.push(presetButton);
     }
     presetRow.append(presetLabel, presetGroup);
 
-    // 出現間隔（auto モードのみ有効）
+    // 出現間隔（動画モードタブ）
     const intervalRow = document.createElement("div");
     intervalRow.className = "cd-options-row";
     const intervalLabel = document.createElement("label");
@@ -313,7 +275,7 @@ export class OptionsPanel {
     intervalInput.addEventListener("input", () => this.onIntervalInput());
     intervalRow.append(intervalLabel, intervalInput, intervalValue);
 
-    // 遊びすぎ防止（auto モードのみ有効）。一定時間後に自動停止する上限(分)を選ぶ。0=なし。
+    // 遊びすぎ防止（動画モードタブ）。一定時間後に自動停止する上限(分)を選ぶ。0=なし。
     const playLimitRow = document.createElement("div");
     playLimitRow.className = "cd-options-row";
     const playLimitLabel = document.createElement("label");
@@ -334,17 +296,39 @@ export class OptionsPanel {
     });
     playLimitRow.append(playLimitLabel, playLimitSelect);
 
-    modeSection.append(modeRow, manualTypeRow, speedRow, presetRow, intervalRow, playLimitRow);
+    // マウスカーソルを隠す（共通タブ「表示」）。change → settings.setHideCursor（永続化＋購読で実配線）。
+    const hideCursorRow = document.createElement("div");
+    hideCursorRow.className = "cd-options-row";
+    const hideCursorLabel = document.createElement("label");
+    hideCursorLabel.className = "cd-options-label";
+    hideCursorLabel.textContent = "マウスカーソルを隠す";
+    hideCursorLabel.htmlFor = "cd-hide-cursor-input";
+    const hideCursorInput = document.createElement("input");
+    hideCursorInput.type = "checkbox";
+    hideCursorInput.id = "cd-hide-cursor-input";
+    hideCursorInput.className = "cd-options-checkbox";
+    hideCursorInput.addEventListener("change", () => {
+      this.settings.setHideCursor(hideCursorInput.checked);
+    });
+    hideCursorRow.append(hideCursorLabel, hideCursorInput);
 
-    // --- 背景セクション ---
-    const bgSection = document.createElement("section");
-    bgSection.className = "cd-options-section";
-    const bgTitle = document.createElement("h3");
-    bgTitle.className = "cd-options-section-title";
-    bgTitle.textContent = "背景";
-    bgSection.appendChild(bgTitle);
+    // 全画面トグル（Fullscreen API 未対応環境ではボタンを生成しない）。
+    let fullscreenButton: HTMLButtonElement | null = null;
+    let fullscreenRow: HTMLDivElement | null = null;
+    if (isFullscreenSupported()) {
+      fullscreenRow = document.createElement("div");
+      fullscreenRow.className = "cd-options-row";
+      fullscreenButton = document.createElement("button");
+      fullscreenButton.type = "button";
+      fullscreenButton.className = "cd-options-secondary";
+      // ラベル/aria は syncFullscreen() で現在の全画面状態に同期する（初期反映も同メソッド）。
+      fullscreenButton.addEventListener("click", () => {
+        void toggleAppFullscreen();
+      });
+      fullscreenRow.appendChild(fullscreenButton);
+    }
 
-    // 背景色
+    // 背景色（共通タブ「背景」）
     const colorRow = document.createElement("div");
     colorRow.className = "cd-options-row";
     const colorLabel = document.createElement("label");
@@ -391,17 +375,7 @@ export class OptionsPanel {
     });
     resetRow.appendChild(resetButton);
 
-    bgSection.append(colorRow, imageRow, resetRow);
-
-    // --- オブジェクトセクション（ユーザー任意画像クリッター・単一スロット） ---
-    const critterSection = document.createElement("section");
-    critterSection.className = "cd-options-section";
-    const critterTitle = document.createElement("h3");
-    critterTitle.className = "cd-options-section-title";
-    critterTitle.textContent = "オブジェクト";
-    critterSection.appendChild(critterTitle);
-
-    // オブジェクト画像（1枚。label でボタン化し、実 input は視覚的に隠す）
+    // オブジェクト画像（共通タブ「オブジェクト」。1枚。label でボタン化し、実 input は視覚的に隠す）
     const critterImageRow = document.createElement("div");
     critterImageRow.className = "cd-options-row";
     const critterLabelText = document.createElement("span");
@@ -432,43 +406,7 @@ export class OptionsPanel {
     });
     critterResetRow.appendChild(critterClearButton);
 
-    critterSection.append(critterImageRow, critterResetRow);
-
-    // --- 出現する種類セクション（auto モードの組み込み種別 ON/OFF） ---
-    // 渡された種別ごとにチェックボックスを並べる。change で settings.setAutoTypeEnabled を呼び、
-    // syncFromSettings で checked を autoDisabledTypes から復元する。種別が無ければ非表示。
-    const autoTypes = options.autoTypes ?? [];
-    const typesSection = document.createElement("section");
-    typesSection.className = "cd-options-section";
-    const typesTitle = document.createElement("h3");
-    typesTitle.className = "cd-options-section-title";
-    typesTitle.textContent = "出現する種類";
-    typesSection.appendChild(typesTitle);
-    for (const type of autoTypes) {
-      const typeRow = document.createElement("div");
-      typeRow.className = "cd-options-row";
-      const typeLabel = document.createElement("label");
-      typeLabel.className = "cd-options-label";
-      typeLabel.textContent = type.name;
-      typeLabel.htmlFor = `cd-auto-type-${type.id}`;
-      const typeCheckbox = document.createElement("input");
-      typeCheckbox.type = "checkbox";
-      typeCheckbox.id = `cd-auto-type-${type.id}`;
-      typeCheckbox.className = "cd-options-checkbox";
-      typeCheckbox.addEventListener("change", () => {
-        this.settings.setAutoTypeEnabled(type.id, typeCheckbox.checked);
-      });
-      typeRow.append(typeLabel, typeCheckbox);
-      typesSection.appendChild(typeRow);
-      this.autoTypeChecks.push({ id: type.id, input: typeCheckbox });
-    }
-
-    // --- 音量セクション ---
-    const volSection = document.createElement("section");
-    volSection.className = "cd-options-section";
-    const volTitle = document.createElement("h3");
-    volTitle.className = "cd-options-section-title";
-    volTitle.textContent = "音量";
+    // 音量（共通タブ「音量」）
     const volRow = document.createElement("div");
     volRow.className = "cd-options-row";
     const volLabel = document.createElement("label");
@@ -486,9 +424,7 @@ export class OptionsPanel {
     volumeInput.addEventListener("input", () => this.onVolumeInput());
     volRow.append(volLabel, volumeInput, volumeValue);
 
-    // ミュート（映像のみモード）。音量スライダとは独立した一括ミュート。ON でも音量値は保持する
-    // （解除で元の音量に戻る）。「出現する種類」チェックボックスと同じ作り（cd-options-checkbox）。
-    // スライダは意図的に disabled にしない: 解除後の音量を事前調整できるようにするため。
+    // ミュート（映像のみモード）。音量スライダとは独立した一括ミュート。ON でも音量値は保持する。
     const muteRow = document.createElement("div");
     muteRow.className = "cd-options-row";
     const muteLabel = document.createElement("label");
@@ -504,17 +440,85 @@ export class OptionsPanel {
     });
     muteRow.append(muteLabel, muteInput);
 
-    volSection.append(volTitle, volRow, muteRow);
-
-    card.appendChild(header);
-    // 「表示」セクションはヘッダ直後（モードセクションの前）へ常に差し込む（カーソル非表示トグルを含む）。
-    card.appendChild(displaySection);
-    card.append(modeSection, bgSection, critterSection);
-    // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
-    if (this.autoTypeChecks.length > 0) {
-      card.appendChild(typesSection);
+    // 「出現する種類」チェックボックス（動画モードタブ。渡された組み込み種別ごとに 1 つ）。
+    // change で settings.setAutoTypeEnabled を呼び、syncAutoTypes で checked を復元する。
+    const autoTypes = options.autoTypes ?? [];
+    const typeRows: HTMLDivElement[] = [];
+    for (const type of autoTypes) {
+      const typeRow = document.createElement("div");
+      typeRow.className = "cd-options-row";
+      const typeLabel = document.createElement("label");
+      typeLabel.className = "cd-options-label";
+      typeLabel.textContent = type.name;
+      typeLabel.htmlFor = `cd-auto-type-${type.id}`;
+      const typeCheckbox = document.createElement("input");
+      typeCheckbox.type = "checkbox";
+      typeCheckbox.id = `cd-auto-type-${type.id}`;
+      typeCheckbox.className = "cd-options-checkbox";
+      typeCheckbox.addEventListener("change", () => {
+        this.settings.setAutoTypeEnabled(type.id, typeCheckbox.checked);
+      });
+      typeRow.append(typeLabel, typeCheckbox);
+      typeRows.push(typeRow);
+      this.autoTypeChecks.push({ id: type.id, input: typeCheckbox });
     }
-    card.appendChild(volSection);
+
+    // =========================================================================
+    // タブ組み立て（3 タブ＝共通/マウスモード/動画モード）。各セクションを対応パネルへ。
+    // =========================================================================
+
+    // --- 共通タブ: 動作(モード/動きの速さ)・表示・音量・背景・オブジェクト ---
+    const behaviorSection = createSection("動作");
+    behaviorSection.append(modeRow, speedRow);
+    const displaySection = createSection("表示");
+    displaySection.appendChild(hideCursorRow);
+    if (fullscreenRow) {
+      displaySection.appendChild(fullscreenRow);
+    }
+    const volSection = createSection("音量");
+    volSection.append(volRow, muteRow);
+    const bgSection = createSection("背景");
+    bgSection.append(colorRow, imageRow, resetRow);
+    const critterSection = createSection("オブジェクト");
+    critterSection.append(critterImageRow, critterResetRow);
+
+    const commonPanel = this.createTabPanel(0);
+    commonPanel.append(behaviorSection, displaySection, volSection, bgSection, critterSection);
+
+    // --- マウスモードタブ: 操作するもの ---
+    const manualSection = createSection("操作対象");
+    manualSection.appendChild(manualTypeRow);
+    const manualPanel = this.createTabPanel(1);
+    manualPanel.appendChild(manualSection);
+
+    // --- 動画モードタブ: 出現(プリセット/出現間隔)・出現する種類・遊びすぎ防止 ---
+    const spawnSection = createSection("出現");
+    spawnSection.append(presetRow, intervalRow);
+    const autoPanel = this.createTabPanel(2);
+    autoPanel.appendChild(spawnSection);
+    // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
+    if (typeRows.length > 0) {
+      const typesSection = createSection("出現する種類");
+      for (const row of typeRows) {
+        typesSection.appendChild(row);
+      }
+      autoPanel.appendChild(typesSection);
+    }
+    const playLimitSection = createSection("遊びすぎ防止");
+    playLimitSection.appendChild(playLimitRow);
+    autoPanel.appendChild(playLimitSection);
+
+    // タブリスト（ヘッダ直下）＋タブパネルをカードへ。
+    const tablist = document.createElement("div");
+    tablist.className = "cd-options-tablist";
+    tablist.setAttribute("role", "tablist");
+    tablist.setAttribute("aria-label", "設定カテゴリ");
+    tablist.addEventListener("keydown", this.onTabKeyDown);
+    for (const button of this.tabButtons) {
+      tablist.appendChild(button);
+    }
+
+    card.append(header, tablist, commonPanel, manualPanel, autoPanel);
     overlay.appendChild(card);
 
     this.element = overlay;
@@ -523,20 +527,19 @@ export class OptionsPanel {
     this.hideCursorInput = hideCursorInput;
     this.modeSelect = modeSelect;
     this.manualTypeSelect = manualTypeSelect;
-    this.manualTypeRow = manualTypeRow;
     this.speedSelect = speedSelect;
-    this.presetRow = presetRow;
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
-    this.intervalRow = intervalRow;
     this.playLimitSelect = playLimitSelect;
-    this.playLimitRow = playLimitRow;
     this.colorInput = colorInput;
     this.fileInput = fileInput;
     this.critterFileInput = critterFileInput;
     this.volumeInput = volumeInput;
     this.volumeValue = volumeValue;
     this.muteInput = muteInput;
+
+    // 初期選択（共通タブ）を反映する。
+    this.selectTab(0);
 
     // Esc で閉じる（入力中にフォーカスがどこにあっても効くよう document で購読）。
     document.addEventListener("keydown", this.onKeyDown);
@@ -550,6 +553,63 @@ export class OptionsPanel {
     this.syncFromSettings(this.settings.settings);
     this.syncFullscreen();
   }
+
+  /**
+   * タブボタンと対応 tabpanel を 1 組作り、this.tabButtons / this.tabPanels に登録して panel を返す。
+   * 呼び出し側はこの panel へセクションを append する。ボタンの click / roving tabindex / aria も配線する。
+   */
+  private createTabPanel(index: number): HTMLElement {
+    const tab = OPTIONS_TABS[index];
+    const selected = index === 0;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cd-options-tab";
+    button.setAttribute("role", "tab");
+    button.id = `cd-options-tab-${tab.id}`;
+    button.setAttribute("aria-controls", `cd-options-tabpanel-${tab.id}`);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    button.textContent = tab.label;
+    button.addEventListener("click", () => this.selectTab(index));
+    this.tabButtons.push(button);
+
+    const panel = document.createElement("div");
+    panel.className = "cd-options-tabpanel";
+    panel.id = `cd-options-tabpanel-${tab.id}`;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", button.id);
+    panel.hidden = !selected;
+    this.tabPanels.push(panel);
+
+    return panel;
+  }
+
+  /** 指定タブを選択（対応 tabpanel のみ表示・他は hidden。aria/roving tabindex も更新）。 */
+  private selectTab(index: number): void {
+    if (index < 0 || index >= this.tabButtons.length) {
+      return;
+    }
+    this.activeTabIndex = index;
+    for (let i = 0; i < this.tabButtons.length; i++) {
+      const isSelected = i === index;
+      const button = this.tabButtons[i];
+      button.setAttribute("aria-selected", String(isSelected));
+      button.tabIndex = isSelected ? 0 : -1;
+      this.tabPanels[i].hidden = !isSelected;
+    }
+  }
+
+  /** タブリスト上の矢印/Home/End で選択とフォーカスを移す（自動アクティベーション）。 */
+  private readonly onTabKeyDown = (event: KeyboardEvent): void => {
+    const target = tabKeyTarget(this.activeTabIndex, event.key, this.tabButtons.length);
+    if (target < 0) {
+      return;
+    }
+    event.preventDefault();
+    this.selectTab(target);
+    this.tabButtons[target].focus();
+  };
 
   /** 指定親へマウントする（通常 document.body）。 */
   mount(parent: HTMLElement): void {
@@ -681,7 +741,7 @@ export class OptionsPanel {
   /** 現在の設定値をコントロールへ反映する（起動時・外部変更・開いた時に呼ぶ）。 */
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
-    this.syncManualType(settings.mode, settings.manualTypeId);
+    this.syncManualType(settings.manualTypeId);
     this.syncSpeed(settings.speedScale);
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
@@ -711,16 +771,13 @@ export class OptionsPanel {
   }
 
   /**
-   * [UR-4] 操作するもの select を settings.manualTypeId から復元し、manual モードのみ有効化する。
-   * auto モードでは行ごと淡色化＋無効化して意味を明確にする（出現間隔と同じ活性制御の流儀）。
+   * [UR-4] 操作するもの select を settings.manualTypeId から復元する。
+   * タブでモード別に分けたため disabled 制御は撤廃（常時編集可）。配線・復元は維持する。
    */
-  private syncManualType(mode: AppMode, manualTypeId: string): void {
+  private syncManualType(manualTypeId: string): void {
     if (this.manualTypeSelect.value !== manualTypeId) {
       this.manualTypeSelect.value = manualTypeId;
     }
-    const disabled = mode !== "manual";
-    this.manualTypeSelect.disabled = disabled;
-    this.manualTypeRow.classList.toggle("cd-options-row-disabled", disabled);
   }
 
   /** ミュートチェックボックスを settings.muted から復元する（外部変更にも追従）。 */
@@ -747,6 +804,10 @@ export class OptionsPanel {
     }
   }
 
+  /**
+   * モード select・出現間隔スライダ・遊びすぎ防止 select を現在値へ復元する。
+   * タブでモード別に分けたため disabled 制御は撤廃（各コントロールは常時編集可）。
+   */
   private syncMode(mode: AppMode, intervalMs: number, playLimitMinutes: number): void {
     if (this.modeSelect.value !== mode) {
       this.modeSelect.value = mode;
@@ -756,23 +817,11 @@ export class OptionsPanel {
       this.intervalInput.value = text;
     }
     this.intervalValue.textContent = formatIntervalMs(intervalMs);
-    // 出現間隔・出現プリセット・遊びすぎ防止は auto モードのみ有効。manual では無効化して意味を明確にする。
-    const disabled = mode !== "auto";
-    this.intervalInput.disabled = disabled;
-    this.intervalRow.classList.toggle("cd-options-row-disabled", disabled);
-
-    // 出現プリセットも auto 専用。行の淡色化に加え各ボタンを disabled にして誤操作を防ぐ。
-    for (const button of this.presetButtons) {
-      button.disabled = disabled;
-    }
-    this.presetRow.classList.toggle("cd-options-row-disabled", disabled);
 
     const playLimitText = String(playLimitMinutes);
     if (this.playLimitSelect.value !== playLimitText) {
       this.playLimitSelect.value = playLimitText;
     }
-    this.playLimitSelect.disabled = disabled;
-    this.playLimitRow.classList.toggle("cd-options-row-disabled", disabled);
   }
 
   private syncBackground(background: BackgroundSettings): void {
