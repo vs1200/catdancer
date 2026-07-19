@@ -113,6 +113,10 @@ function createHelpSection(): HTMLElement {
       "操作するもの",
       "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫／任意画像）を選べます。虫を選ぶと動きパターン（クリックで出現／マウス追従）、任意画像を選ぶと使いたい画像を設定できます（任意画像は動画モードには出ません）。オブジェクトの大きさは「マウスモード」「動画モード」各タブの「大きさ」から、種類ごと・モードごとに変えられます。",
     ],
+    [
+      "効果音",
+      "オブジェクトごとの効果音（走行音・鳴き声・羽音・キャッチ音）は「共通」タブの「効果音（オブジェクト別）」でオン／オフできます。オフにするとそのオブジェクトの音はマウス操作モードでも動画モードでも鳴りません。",
+    ],
     ["キーボード", "Space＝一時停止／再開、f＝全画面の切替、m＝モードの切替。"],
   ];
   for (const [term, desc] of items) {
@@ -192,6 +196,8 @@ export class OptionsPanel {
   private readonly muteInput: HTMLInputElement;
   /** 「出現する種類」チェックボックス（種別 id と input のペア）。 */
   private readonly autoTypeChecks: Array<{ id: string; input: HTMLInputElement }> = [];
+  /** [UR4-3] 効果音（オブジェクト別）チェックボックス（種別 id と input のペア。全5種別）。 */
+  private readonly soundToggleChecks: Array<{ id: string; input: HTMLInputElement }> = [];
 
   /** タブボタン群（OPTIONS_TABS と同順）。aria-selected / roving tabindex を切り替える。 */
   private readonly tabButtons: HTMLButtonElement[] = [];
@@ -587,6 +593,30 @@ export class OptionsPanel {
     });
     muteRow.append(muteLabel, muteInput);
 
+    // [UR4-3] 効果音（オブジェクト別）チェックボックス（共通タブ・音量セクションの近く＝発見性を上げる）。
+    // 全5種別（ネズミ/ねこじゃらし/おもちゃ/虫/任意画像）を MANUAL_TARGETS から生成する（「出現する種類」の
+    // per-type チェックボックス生成パターンを流用）。change → settings.setObjectSoundEnabled（checked=SE鳴る）。
+    // モード非依存の per-type 単一フラグなので共通タブに置く。復元は syncObjectSounds が担う（syncAutoTypes と同型）。
+    const soundToggleRows: HTMLDivElement[] = [];
+    for (const target of MANUAL_TARGETS) {
+      const soundRow = document.createElement("div");
+      soundRow.className = "cd-options-row";
+      const soundLabel = document.createElement("label");
+      soundLabel.className = "cd-options-label";
+      soundLabel.textContent = target.label;
+      soundLabel.htmlFor = `cd-sound-toggle-${target.id}`;
+      const soundCheckbox = document.createElement("input");
+      soundCheckbox.type = "checkbox";
+      soundCheckbox.id = `cd-sound-toggle-${target.id}`;
+      soundCheckbox.className = "cd-options-checkbox";
+      soundCheckbox.addEventListener("change", () => {
+        this.settings.setObjectSoundEnabled(target.id, soundCheckbox.checked);
+      });
+      soundRow.append(soundLabel, soundCheckbox);
+      soundToggleRows.push(soundRow);
+      this.soundToggleChecks.push({ id: target.id, input: soundCheckbox });
+    }
+
     // 「出現する種類」チェックボックス（動画モードタブ。渡された組み込み種別ごとに 1 つ）。
     // change で settings.setAutoTypeEnabled を呼び、syncAutoTypes で checked を復元する。
     const autoTypes = options.autoTypes ?? [];
@@ -653,6 +683,11 @@ export class OptionsPanel {
     }
     const volSection = createSection("音量");
     volSection.append(volRow, muteRow);
+    // [UR4-3] 効果音（オブジェクト別）セクション。音量セクションの直後に置き発見性を上げる。
+    const soundSection = createSection("効果音（オブジェクト別）");
+    for (const row of soundToggleRows) {
+      soundSection.appendChild(row);
+    }
     const bgSection = createSection("背景");
     bgSection.append(colorRow, imageRow, resetRow);
     // [UR3-10] 任意画像の設定（アップロード/削除）。共通タブ常時表示ではなく、マウスモードタブで
@@ -663,7 +698,14 @@ export class OptionsPanel {
     const helpSection = createHelpSection();
 
     const commonPanel = this.createTabPanel(0);
-    commonPanel.append(behaviorSection, displaySection, volSection, bgSection, helpSection);
+    commonPanel.append(
+      behaviorSection,
+      displaySection,
+      volSection,
+      soundSection,
+      bgSection,
+      helpSection,
+    );
 
     // --- マウスモードタブ: 操作するもの・(虫のみ)動きパターン・動き(速さ) ---
     const manualSection = createSection("操作対象");
@@ -971,6 +1013,7 @@ export class OptionsPanel {
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
     this.syncMute(settings.muted);
+    this.syncObjectSounds(settings.objectSoundEnabled);
     this.syncHideCursor(settings.hideCursor);
   }
 
@@ -1057,6 +1100,19 @@ export class OptionsPanel {
   private syncAutoTypes(disabledTypes: readonly string[]): void {
     for (const { id, input } of this.autoTypeChecks) {
       const checked = !disabledTypes.includes(id);
+      if (input.checked !== checked) {
+        input.checked = checked;
+      }
+    }
+  }
+
+  /**
+   * [UR4-3] 効果音（オブジェクト別）チェックボックスを objectSoundEnabled から復元する（外部変更にも追従）。
+   * checked=SE鳴る。欠損キーは true（既定＝鳴る）でフォールバックする（syncAutoTypes と同型）。
+   */
+  private syncObjectSounds(objectSoundEnabled: Record<string, boolean>): void {
+    for (const { id, input } of this.soundToggleChecks) {
+      const checked = objectSoundEnabled[id] ?? true;
       if (input.checked !== checked) {
         input.checked = checked;
       }
