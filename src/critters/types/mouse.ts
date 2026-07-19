@@ -9,7 +9,12 @@ export const MOUSE_TYPE_ID = "mouse";
 // Vite は base:"./" 環境。絶対 /assets ではなく BASE_URL 基点で解決する。
 const MOUSE_TEXTURE_URL = `${import.meta.env.BASE_URL}assets/critters/mouse-body.webp`;
 
-/** 尻尾テクスチャ（元 house-mouse から抽出した本物。左=根元(attach) / 右=先端）。共有ロードする。 */
+/**
+ * 尻尾テクスチャ（元 house-mouse から抽出した本物。左=根元(attach) / 右=先端）。共有ロードする。
+ * リボン幅は PixiJS MeshRope の仕様上「テクスチャの縦(px)」で決まる（widthScale は効かない。詳細は
+ * RopeTail.ts）。UR-2 で元画像のように細くするため 541x90 → 541x30 に縦圧縮（縦パディング trim + 縦 30px
+ * へ縮小）して差し替え済み。太さを変える場合はこの webp の縦 px を調整する。
+ */
 export const MOUSE_TAIL_TEXTURE_URL = `${import.meta.env.BASE_URL}assets/critters/mouse-tail.webp`;
 
 /**
@@ -17,8 +22,9 @@ export const MOUSE_TAIL_TEXTURE_URL = `${import.meta.env.BASE_URL}assets/critter
  * 尻尾は本物テクスチャ(mouse-tail.webp)＋ワールド空間の物理トレイル（hasTail=true, tail 設定参照）。
  * SE 識別子はプレースホルダ。
  *
- * tail: 付け根は本体後方下 (x≈0.06, y≈0.83)。lengthFactor/widthScale は表示幅・テクスチャ比率に対する
- * 係数。damping で尾の引き具合、constraintIterations で張り、gravity=0 で純トレイル（静止で止まる）。
+ * tail: 付け根は本体後方下 (x≈0.06, y≈0.83)。lengthFactor は表示幅に対する係数。damping で尾の引き具合、
+ * constraintIterations で張り、gravity=0 で純トレイル（静止で止まる）。太さ(widthScale)は MeshRope 仕様で
+ * 無効化される（実幅=テクスチャ縦px）ため、細さはテクスチャ側で調整する（MOUSE_TAIL_TEXTURE_URL 参照）。
  */
 export const mouseType: CritterType = {
   id: MOUSE_TYPE_ID,

@@ -110,8 +110,10 @@ export class RopeTail {
  * {@link TailConfig}（正規化・係数指定）と表示寸法・初期状態から {@link RopeTail} を組み立てる。
  *
  * - 全長 = lengthFactor * displayWidth、セグメント長 = 全長 / (N-1)。
- * - リボン幅 = widthScale * (テクスチャ高/幅) * 全長 でテクスチャの縦横比を保つ（見た目のテーパーは
- *   テクスチャのアルファが担う）。
+ * - リボン幅 = widthScale * (テクスチャ高/幅) * 全長 として渡すが、PixiJS の MeshRope は autoUpdate 時に
+ *   毎フレーム geometry 幅をテクスチャ縦(px)へ上書きするため、実描画幅は「テクスチャ縦px」に固定される
+ *   （＝widthScale は初期フレームのみで実質無効）。太さの調整はテクスチャの縦px側で行う。見た目のテーパー
+ *   はテクスチャのアルファが担う（RopeGeometry の ratio による先細りは当バージョンでは未使用）。
  * - 頭/後方ベクトルは Critter が本体 state（位置・向き）から算出して渡す（ワールド空間）。
  */
 export function createRopeTail(
