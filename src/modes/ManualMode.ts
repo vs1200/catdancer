@@ -1,51 +1,68 @@
-import type { Texture } from "pixi.js";
-import type { PointerInput } from "../app/PointerInput";
-import type { Scene } from "../app/Scene";
-import type { AudioSink } from "../audio/AudioManager";
-import { SCURRY_LEVEL_MOUSE_FOLLOW } from "../audio/audioMath";
-import { CritterAudioController } from "../audio/CritterAudioController";
-import type { Critter } from "../critters/Critter";
-import { spawnCritter } from "../critters/Critter";
-import type { CritterSoundSet } from "../critters/CritterType";
-import type { MovementContext } from "../movement/Movement";
 import type { Mode } from "./Mode";
+import type {
+  ManualController,
+  ManualControllerFactory,
+  ManualControllerSnapshot,
+} from "./manual/ManualController";
 
 export interface ManualModeDeps {
-  scene: Scene;
-  /** ポインタ入力（本モードが attach/detach を占有管理する）。 */
-  pointer: PointerInput;
-  bodyTexture: Texture;
-  /** 尻尾テクスチャ（共有）。 */
-  tailTexture?: Texture;
-  audio: AudioSink;
-  sounds: CritterSoundSet;
-  typeId: string;
+  /**
+   * 操作対象 typeId → コントローラ factory のマップ。UR-4 では全対象が FollowManualController に
+   * マップされる（全種カーソル追従）。UR-5/UR-6 は foxtail/insect のエントリを専用コントローラの
+   * factory に差し替えることで固有 manual 挙動へ置き換える拡張点になる。
+   */
+  factories: Map<string, ManualControllerFactory>;
+  /** 起動時の操作対象 typeId（factories に無ければ fallback へ正規化する）。 */
+  initialTypeId: string;
+  /** 選択解決の最終フォールバック typeId（通常 mouse。必ず factories に存在すること）。 */
+  fallbackTypeId: string;
 }
 
 /**
- * v1 のマウス操作モードを Mode として包む（挙動は現状維持）。
+ * [UR-4] マウス操作モードのコーディネータ。選択中 typeId の {@link ManualController} 1 本を保持し、
+ * start/stop/setPaused/setSpeedScale/update/onPointerDown/debugSnapshot を委譲する。
  *
- * 1 体のネズミを画面中央に spawn し、PointerInput＋種別既定の MouseFollowMovement で
- * ポインタへ慣性追従させる。走行音/チューチューSE も連動させる。
- * start でポインタ配線・critter・SE を確保し、stop で全て解放する（切替リークなし）。
+ * 従来のネズミ 1 体固定を「操作対象を選べる基盤」へ一般化した。実挙動は各コントローラが担い、本クラスは
+ * ライフサイクル管理と種別切替（{@link setManualType}）に集中する。切替では旧コントローラを stop→新規
+ * create+start で差し替え、critter/pointer/audio をリークなく破棄する（同時に出るのは常に 1 体）。
+ * speedScale/paused はコーディネータが保持し、切替後の新コントローラへ再適用して状態を引き継ぐ。
  */
 export class ManualMode implements Mode {
-  private readonly deps: ManualModeDeps;
-  private readonly ctx: MovementContext;
-  private readonly audioCtrl: CritterAudioController;
-  private critter: Critter | null = null;
+  private readonly factories: Map<string, ManualControllerFactory>;
+  private readonly fallbackTypeId: string;
+  private currentTypeId: string;
+  private controller: ManualController | null = null;
   private running = false;
   private paused = false;
+  /** 現在の速度倍率（コントローラ切替をまたいで保持し、新コントローラへ再適用する）。 */
+  private speedScale = 1;
 
   constructor(deps: ManualModeDeps) {
-    this.deps = deps;
-    // speedScale=1 で明示初期化（省略時1扱いだが意図を明確化）。update は world/pointer のみ
-    // 上書きし speedScale は触らないため、mutate 再利用の ctx に設定は持続する。
-    this.ctx = { world: deps.scene.worldBounds, pointer: null, speedScale: 1 };
-    // ポインタ追従はピーク速度が大きい(~6480)ため、走行音写像は上方調整版で抑揚を残す。
-    this.audioCtrl = new CritterAudioController(deps.audio, deps.sounds, {
-      scurry: SCURRY_LEVEL_MOUSE_FOLLOW,
-    });
+    this.factories = deps.factories;
+    this.fallbackTypeId = deps.fallbackTypeId;
+    this.currentTypeId = this.resolveTypeId(deps.initialTypeId);
+  }
+
+  /** factories に存在する typeId ならそのまま、無ければ fallback へ解決する。 */
+  private resolveTypeId(typeId: string): string {
+    return this.factories.has(typeId) ? typeId : this.fallbackTypeId;
+  }
+
+  /** 現在の操作対象 typeId（DEV フック/検証の観測用）。 */
+  get currentType(): string {
+    return this.currentTypeId;
+  }
+
+  /** 現在の typeId のコントローラを生成し、保持中の speedScale を反映して返す。 */
+  private createController(): ManualController {
+    const factory =
+      this.factories.get(this.currentTypeId) ?? this.factories.get(this.fallbackTypeId);
+    if (!factory) {
+      throw new Error(`manual コントローラの factory がありません: ${this.currentTypeId}`);
+    }
+    const controller = factory();
+    controller.setSpeedScale(this.speedScale);
+    return controller;
   }
 
   start(): void {
@@ -54,18 +71,8 @@ export class ManualMode implements Mode {
     }
     this.running = true;
     this.paused = false;
-    const { scene, pointer } = this.deps;
-    pointer.attach();
-    pointer.centerToViewport();
-    const vp = scene.worldBounds.viewport;
-    this.critter = spawnCritter({
-      typeId: this.deps.typeId,
-      bodyTexture: this.deps.bodyTexture,
-      tailTexture: this.deps.tailTexture,
-      spawn: { position: { x: vp.width / 2, y: vp.height / 2 } },
-    });
-    scene.add(this.critter);
-    this.audioCtrl.start();
+    this.controller = this.createController();
+    this.controller.start();
   }
 
   stop(): void {
@@ -73,86 +80,55 @@ export class ManualMode implements Mode {
       return;
     }
     this.running = false;
-    this.deps.pointer.detach();
-    this.audioCtrl.stop();
-    if (this.critter) {
-      this.deps.scene.despawn(this.critter);
-      this.critter = null;
-    }
+    this.controller?.stop();
+    this.controller = null;
   }
 
   /**
-   * 動きの速さの全体倍率を設定する（実行中でも即反映）。ctx に載せておき、Critter.update が
-   * dt に乗じて追従の動き全体へ均一適用する（マウス追従の速さが倍率で変わる）。
+   * 操作対象を切り替える（実行中でも即反映）。旧コントローラを stop→新種別で create+start し、
+   * 前の 1 体（critter/pointer/audio）をリークなく破棄して新 1 体のみにする。paused 中の切替では
+   * 新コントローラにも paused を再適用して状態を保つ（パネル開いたまま種別変更時など）。
    */
-  setSpeedScale(scale: number): void {
-    this.ctx.speedScale = scale;
-  }
-
-  /**
-   * 一時停止。paused の間はポインタを外し中央へ寄せて、パネル操作でネズミを画面外へ
-   * 飛ばさないようにする（v1 の onOpenChange 挙動の踏襲）。復帰でポインタを再配線する。
-   */
-  setPaused(paused: boolean): void {
-    this.paused = paused;
-    if (!this.running) {
+  setManualType(typeId: string): void {
+    const next = this.resolveTypeId(typeId);
+    if (next === this.currentTypeId) {
       return;
     }
-    if (paused) {
-      // ループSE(走行音)を即無音化する（パネルを開くと最後の音量のまま鳴り続けるのを防ぐ）。
-      this.audioCtrl.silence();
-      this.deps.pointer.detach();
-      this.deps.pointer.centerToViewport();
-    } else {
-      this.deps.pointer.attach();
+    this.currentTypeId = next;
+    if (!this.running || !this.controller) {
+      return; // 未起動なら typeId 更新のみ（次の start が新種別で立ち上げる）。
     }
+    this.controller.stop();
+    const controller = this.createController();
+    this.controller = controller;
+    controller.start();
+    if (this.paused) {
+      controller.setPaused(true);
+    }
+  }
+
+  /** 動きの速さ倍率を設定する（保持しつつ現行コントローラへ即反映）。 */
+  setSpeedScale(scale: number): void {
+    this.speedScale = scale;
+    this.controller?.setSpeedScale(scale);
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.controller?.setPaused(paused);
   }
 
   update(dtSeconds: number): void {
-    if (!this.running || this.paused || !this.critter) {
-      return;
-    }
-    this.ctx.world = this.deps.scene.worldBounds;
-    this.ctx.pointer = this.deps.pointer.pointer.value;
-    this.critter.update(dtSeconds, this.ctx);
-    const speed = Math.hypot(this.critter.state.velocity.x, this.critter.state.velocity.y);
-    // ネズミ 1 体で常に存在するため present=true 固定。
-    this.audioCtrl.update(speed, dtSeconds, true);
+    this.controller?.update(dtSeconds);
   }
 
-  /**
-   * DEV フック用の観測スナップショット（本番では main.ts 側の import.meta.env.DEV で除外）。
-   * 現在のネズミ位置/速度とポインタ（=追従目標）を返す。追従応答性の客観計測に使う。
-   */
-  debugSnapshot(): {
-    position: { x: number; y: number };
-    velocity: { x: number; y: number };
-    pointer: { x: number; y: number } | null;
-    running: boolean;
-    paused: boolean;
-    /** state.heading(rad)。回転方式(rotate)の追従角。 */
-    heading: number;
-    /** 実 view.rotation(rad)。heading と一致するはず（回転検証用）。 */
-    viewRotation: number;
-    /** view.scale.y。左半分(鏡像)で -1（上下逆さ回避の検証用）。 */
-    viewScaleY: number;
-    /** 尻尾先端のワールド座標（静止/トレイル検証用）。尻尾が無ければ null。 */
-    tailTip: { x: number; y: number } | null;
-  } | null {
-    if (!this.critter) {
-      return null;
-    }
-    const p = this.deps.pointer.pointer.value;
-    return {
-      position: { x: this.critter.state.position.x, y: this.critter.state.position.y },
-      velocity: { x: this.critter.state.velocity.x, y: this.critter.state.velocity.y },
-      pointer: p ? { x: p.x, y: p.y } : null,
-      running: this.running,
-      paused: this.paused,
-      heading: this.critter.state.heading,
-      viewRotation: this.critter.view.rotation,
-      viewScaleY: this.critter.view.scale.y,
-      tailTip: this.critter.tailTip,
-    };
+  /** クリック/タップ（world 座標）を現行コントローラへ委譲する（種別固有のクリック挙動）。 */
+  onPointerDown(worldX: number, worldY: number): void {
+    this.controller?.onPointerDown(worldX, worldY);
+  }
+
+  /** DEV フック用の観測スナップショット（現行コントローラへ委譲。未起動/未生成は null）。 */
+  debugSnapshot(): ManualControllerSnapshot | null {
+    return this.controller?.debugSnapshot() ?? null;
   }
 }

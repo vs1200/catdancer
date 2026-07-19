@@ -28,8 +28,11 @@ import { computeWorldMargin } from "./critters/worldMargin";
 import { AutoMode } from "./modes/AutoMode";
 import { ManualMode } from "./modes/ManualMode";
 import type { Mode } from "./modes/Mode";
+import { FollowManualController } from "./modes/manual/FollowManualController";
+import type { ManualControllerFactory } from "./modes/manual/ManualController";
 import { PlayLimitTimer } from "./modes/PlayLimitTimer";
 import { getCritterImage } from "./settings/imageStore";
+import { DEFAULT_MANUAL_TYPE_ID } from "./settings/manualTargets";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
 import { showBootstrapFailure } from "./ui/BootstrapFallback";
@@ -119,14 +122,31 @@ async function bootstrap(): Promise<void> {
   const pointerInput = new PointerInput(app.canvas, () => app.viewport);
 
   // モード実体。両モードとも同じ Scene / 共有テクスチャ / 種別 / SE を再利用する。
+  // [UR-4] 操作対象 typeId → コントローラ factory マップ。UR-4 は全対象を FollowManualController
+  // （カーソル追従＝プレースホルダ）へマップする。テクスチャは既ロード済みの共有物を種別ごとに渡す。
+  // UR-5（ねこじゃらしのフリック）/ UR-6（虫のクリック出現）は、対応する typeId のエントリを専用
+  // コントローラの factory に差し替えれば固有 manual 挙動へ置き換わる（他種別・ManualMode 本体は不変）。
+  const makeFollowFactory =
+    (typeId: string, body: Texture, tail?: Texture): ManualControllerFactory =>
+    () =>
+      new FollowManualController({
+        typeId,
+        bodyTexture: body,
+        tailTexture: tail,
+        audio,
+        pointer: pointerInput,
+        scene,
+      });
+  const manualFactories = new Map<string, ManualControllerFactory>([
+    [MOUSE_TYPE_ID, makeFollowFactory(MOUSE_TYPE_ID, bodyTexture, tailTexture)],
+    [FOXTAIL_TYPE_ID, makeFollowFactory(FOXTAIL_TYPE_ID, foxtailTexture)],
+    [TOYS_TYPE_ID, makeFollowFactory(TOYS_TYPE_ID, toysTexture)],
+    [INSECT_TYPE_ID, makeFollowFactory(INSECT_TYPE_ID, insectTexture)],
+  ]);
   const manualMode = new ManualMode({
-    scene,
-    pointer: pointerInput,
-    bodyTexture,
-    tailTexture,
-    audio,
-    sounds: mouseType.sounds,
-    typeId: MOUSE_TYPE_ID,
+    factories: manualFactories,
+    initialTypeId: settings.settings.manualTypeId,
+    fallbackTypeId: DEFAULT_MANUAL_TYPE_ID,
   });
   // AutoMode は登録済みの auto 対象種別を重み付きでミックス出現させる。
   // mouse=横断、foxtail/toys=揺れて誘い縁へ退場、insect=不規則ダッシュ。重みで出現頻度を調整する。
@@ -307,15 +327,18 @@ async function bootstrap(): Promise<void> {
   };
 
   // canvas のタップ/クリックのプレイ操作。パネル開/自動停止中は無視（オーバーレイ/backdrop が受ける）。
-  // - manual: [UR-3] クリック(タップ)でネズミの鳴き声を鳴らす（SqueakScheduler の断続発火に加えた即時発火）。
-  //   pointerdown は信頼済みユーザージェスチャなので AudioContext の resume 契機にもなる（playOneShot が resume を試みる）。
+  // - manual: [UR-4] クリック(タップ)を現行操作対象コントローラへ委譲する（world 座標を渡す）。
+  //   種別に voice(鳴き声)SEがあれば鳴る（[UR-3] mouse→squeak をコントローラ内へ移設）。voice を持たない
+  //   種別は無音。pointerdown は信頼済みユーザージェスチャなので AudioContext の resume 契機にもなる。
+  //   world 座標は UR-6 の虫クリック出現の受け皿。
   // - auto: 当たった動くオブジェクトを素早く逃がし（画面外へ→despawn）反応SEを鳴らす。空きスペースは無反応。
   app.canvas.addEventListener("pointerdown", (event) => {
     if (panelOpen || autoStoppedByTimer) {
       return;
     }
     if (currentModeName === "manual") {
-      audio.playOneShot(MOUSE_SQUEAK_ID);
+      const world = clientToWorld(app.canvas, app.viewport, event.clientX, event.clientY);
+      manualMode.onPointerDown(world.x, world.y);
       return;
     }
     const p = clientToWorld(app.canvas, app.viewport, event.clientX, event.clientY);
@@ -327,6 +350,7 @@ async function bootstrap(): Promise<void> {
 
   // 設定変更の反映（音量/背景 + モード/出現間隔 + カスタム画像クリッター）。前回値と比較して差分だけ反映する。
   let prevMode = settings.settings.mode;
+  let prevManualTypeId = settings.settings.manualTypeId;
   let prevInterval = settings.settings.autoSpawnIntervalMs;
   let prevPlayLimit = settings.settings.autoPlayLimitMinutes;
   let prevCustomCritterId = settings.settings.customCritterImageId;
@@ -375,6 +399,12 @@ async function bootstrap(): Promise<void> {
     if (next.mode !== prevMode) {
       prevMode = next.mode;
       switchTo(next.mode);
+    }
+    if (next.manualTypeId !== prevManualTypeId) {
+      prevManualTypeId = next.manualTypeId;
+      // [UR-4] 操作対象の切替を manual モードへ即反映（実行中なら旧 critter/pointer/audio を破棄→
+      // 新種別で再構築）。現行が auto でも保持され、manual へ戻った時に反映される。
+      manualMode.setManualType(next.manualTypeId);
     }
     if (next.customCritterImageId !== prevCustomCritterId) {
       prevCustomCritterId = next.customCritterImageId;
@@ -464,7 +494,9 @@ async function bootstrap(): Promise<void> {
           size: c.state.size,
           speed: Math.hypot(c.state.velocity.x, c.state.velocity.y),
         })),
-      // マウス追従の客観計測用: ネズミ位置/速度・ポインタ(=追従目標)・距離を返す。
+      // [UR-4] 現在の manual 操作対象 typeId（種別切替の検証補助）。
+      manualType: () => manualMode.currentType,
+      // マウス追従の客観計測用: 操作対象の位置/速度・ポインタ(=追従目標)・距離を返す。
       manual: () => {
         const snap = manualMode.debugSnapshot();
         if (!snap) {

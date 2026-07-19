@@ -1,4 +1,5 @@
 import type { AudioManager } from "../audio/AudioManager";
+import { MANUAL_TARGETS } from "../settings/manualTargets";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { AppMode, AppSettings, BackgroundSettings } from "../settings/settingsData";
 import {
@@ -90,6 +91,10 @@ export class OptionsPanel {
   /** マウスカーソル非表示モードのチェックボックス（「表示」セクション）。 */
   private readonly hideCursorInput: HTMLInputElement;
   private readonly modeSelect: HTMLSelectElement;
+  /** [UR-4] 操作するもの select（manual モードのみ有効。auto では淡色化＋無効化）。 */
+  private readonly manualTypeSelect: HTMLSelectElement;
+  /** 操作するもの行（manual モードのみ有効。auto では行ごと淡色化）。 */
+  private readonly manualTypeRow: HTMLDivElement;
   /** 動きの速さ select（manual/auto 両モードに効くため常時有効）。 */
   private readonly speedSelect: HTMLSelectElement;
   /** 出現プリセット行（auto モードのみ有効。manual では presetRow ごと淡色化＋ボタン無効化）。 */
@@ -223,6 +228,28 @@ export class OptionsPanel {
     });
     modeRow.append(modeLabel, modeSelect);
 
+    // [UR-4] 操作するもの（マウス操作モードで追従させる種別）。manual のみ有効・auto では淡色化。
+    // change → settings.setManualTypeId（永続化＋購読で manualMode.setManualType へ実配線）。
+    const manualTypeRow = document.createElement("div");
+    manualTypeRow.className = "cd-options-row";
+    const manualTypeLabel = document.createElement("label");
+    manualTypeLabel.className = "cd-options-label";
+    manualTypeLabel.textContent = "操作するもの";
+    manualTypeLabel.htmlFor = "cd-manual-type-select";
+    const manualTypeSelect = document.createElement("select");
+    manualTypeSelect.id = "cd-manual-type-select";
+    manualTypeSelect.className = "cd-options-select";
+    for (const target of MANUAL_TARGETS) {
+      const option = document.createElement("option");
+      option.value = target.id;
+      option.textContent = target.label;
+      manualTypeSelect.appendChild(option);
+    }
+    manualTypeSelect.addEventListener("change", () => {
+      this.settings.setManualTypeId(manualTypeSelect.value);
+    });
+    manualTypeRow.append(manualTypeLabel, manualTypeSelect);
+
     // 動きの速さ（manual/auto 両モードに効くため常時有効。出現間隔のように disabled にしない）。
     // change → settings.setSpeedScale。syncSpeed で現在値を最近傍プリセットへ復元する。
     const speedRow = document.createElement("div");
@@ -307,7 +334,7 @@ export class OptionsPanel {
     });
     playLimitRow.append(playLimitLabel, playLimitSelect);
 
-    modeSection.append(modeRow, speedRow, presetRow, intervalRow, playLimitRow);
+    modeSection.append(modeRow, manualTypeRow, speedRow, presetRow, intervalRow, playLimitRow);
 
     // --- 背景セクション ---
     const bgSection = document.createElement("section");
@@ -495,6 +522,8 @@ export class OptionsPanel {
     this.fullscreenButton = fullscreenButton;
     this.hideCursorInput = hideCursorInput;
     this.modeSelect = modeSelect;
+    this.manualTypeSelect = manualTypeSelect;
+    this.manualTypeRow = manualTypeRow;
     this.speedSelect = speedSelect;
     this.presetRow = presetRow;
     this.intervalInput = intervalInput;
@@ -652,6 +681,7 @@ export class OptionsPanel {
   /** 現在の設定値をコントロールへ反映する（起動時・外部変更・開いた時に呼ぶ）。 */
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
+    this.syncManualType(settings.mode, settings.manualTypeId);
     this.syncSpeed(settings.speedScale);
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
@@ -678,6 +708,19 @@ export class OptionsPanel {
     if (this.speedSelect.value !== text) {
       this.speedSelect.value = text;
     }
+  }
+
+  /**
+   * [UR-4] 操作するもの select を settings.manualTypeId から復元し、manual モードのみ有効化する。
+   * auto モードでは行ごと淡色化＋無効化して意味を明確にする（出現間隔と同じ活性制御の流儀）。
+   */
+  private syncManualType(mode: AppMode, manualTypeId: string): void {
+    if (this.manualTypeSelect.value !== manualTypeId) {
+      this.manualTypeSelect.value = manualTypeId;
+    }
+    const disabled = mode !== "manual";
+    this.manualTypeSelect.disabled = disabled;
+    this.manualTypeRow.classList.toggle("cd-options-row-disabled", disabled);
   }
 
   /** ミュートチェックボックスを settings.muted から復元する（外部変更にも追従）。 */
