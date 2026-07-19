@@ -9,12 +9,13 @@ import {
   createDefaultSettings,
   DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   DEFAULT_AUTO_SPAWN_INTERVAL_MS,
+  DEFAULT_AUTO_SPEED_SCALE,
   DEFAULT_BACKGROUND_COLOR,
   DEFAULT_HIDE_CURSOR,
+  DEFAULT_MANUAL_SPEED_SCALE,
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
   DEFAULT_MUTED,
-  DEFAULT_SPEED_SCALE,
   MAX_AUTO_PLAY_LIMIT_MINUTES,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MAX_SPEED_SCALE,
@@ -284,38 +285,50 @@ describe("normalizeSpeedScale", () => {
   });
 
   it("0以下は既定へ（>0 のみ受理）", () => {
-    expect(normalizeSpeedScale(0)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(-1)).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(0)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(-1)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
   });
 
-  it("数値化できない/非有限/欠損は既定(1.0)へ", () => {
-    expect(normalizeSpeedScale(Number.NaN)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(Number.POSITIVE_INFINITY)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(undefined)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(null)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale("abc")).toBe(DEFAULT_SPEED_SCALE);
-    expect(DEFAULT_SPEED_SCALE).toBe(1.0);
+  it("数値化できない/非有限/欠損は既定(1.0=manual)へ", () => {
+    expect(normalizeSpeedScale(Number.NaN)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(Number.POSITIVE_INFINITY)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(undefined)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(null)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale("abc")).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(DEFAULT_MANUAL_SPEED_SCALE).toBe(1.0);
+  });
+
+  it("[UR3-8] fallback 引数で無効値のフォールバック先を切り替える（auto=1.8）", () => {
+    // 引数を渡すと欠損/無効値はその値へフォールバックする（auto の底上げ既定 1.8 用）。
+    expect(normalizeSpeedScale(undefined, DEFAULT_AUTO_SPEED_SCALE)).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    expect(normalizeSpeedScale(0, DEFAULT_AUTO_SPEED_SCALE)).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    expect(normalizeSpeedScale("abc", DEFAULT_AUTO_SPEED_SCALE)).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    expect(normalizeSpeedScale([], DEFAULT_AUTO_SPEED_SCALE)).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    // 有効値は fallback に関係なくその値を [MIN,MAX] クランプで返す。
+    expect(normalizeSpeedScale(1.4, DEFAULT_AUTO_SPEED_SCALE)).toBe(1.4);
+    expect(normalizeSpeedScale(99, DEFAULT_AUTO_SPEED_SCALE)).toBe(MAX_SPEED_SCALE);
+    expect(DEFAULT_AUTO_SPEED_SCALE).toBe(1.8);
   });
 
   it("数値文字列は解釈する", () => {
     expect(normalizeSpeedScale("1.4")).toBe(1.4);
   });
 
-  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定(1.0)へ", () => {
+  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定(1.0=manual)へ", () => {
     // true は Number(true)=1 で既定と偶然一致していたが、同じ型不一致受理の弱点だったため固定する。
-    expect(normalizeSpeedScale(true)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(false)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(null)).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale("")).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale(" ")).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale([])).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale([5])).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSpeedScale({})).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSpeedScale(true)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(false)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(null)).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale("")).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale(" ")).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale([])).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale([5])).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSpeedScale({})).toBe(DEFAULT_MANUAL_SPEED_SCALE);
   });
 });
 
 describe("createDefaultSettings", () => {
-  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし / 速さ 1.0", () => {
+  it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし / manual速さ 1.0 / auto速さ 1.8", () => {
     const s = createDefaultSettings();
     expect(s).toEqual({
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
@@ -328,7 +341,8 @@ describe("createDefaultSettings", () => {
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
-      speedScale: DEFAULT_SPEED_SCALE,
+      manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
+      autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
     });
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
     expect(DEFAULT_MUTED).toBe(false);
@@ -337,7 +351,9 @@ describe("createDefaultSettings", () => {
     expect(DEFAULT_MODE).toBe("manual");
     expect(DEFAULT_AUTO_SPAWN_INTERVAL_MS).toBe(1500);
     expect(DEFAULT_AUTO_PLAY_LIMIT_MINUTES).toBe(0);
-    expect(DEFAULT_SPEED_SCALE).toBe(1.0);
+    // [UR3-8] manual は従来の 1.0、auto は「とてもはやい」相当へ底上げした 1.8。
+    expect(DEFAULT_MANUAL_SPEED_SCALE).toBe(1.0);
+    expect(DEFAULT_AUTO_SPEED_SCALE).toBe(1.8);
   });
 
   it("呼び出しごとに独立したオブジェクトを返す（共有参照でない）", () => {
@@ -367,7 +383,8 @@ describe("normalizeSettings", () => {
         autoPlayLimitMinutes: 15,
         customCritterImageId: "critter-1",
         autoDisabledTypes: ["insect", "toys"],
-        speedScale: 1.4,
+        manualSpeedScale: 1.4,
+        autoSpeedScale: 2.2,
       }),
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
@@ -380,7 +397,8 @@ describe("normalizeSettings", () => {
       autoPlayLimitMinutes: 15,
       customCritterImageId: "critter-1",
       autoDisabledTypes: ["insect", "toys"],
-      speedScale: 1.4,
+      manualSpeedScale: 1.4,
+      autoSpeedScale: 2.2,
     });
   });
 
@@ -503,18 +521,50 @@ describe("normalizeSettings", () => {
     expect(s.masterVolume).toBe(1);
   });
 
-  it("speedScale は欠損で既定(1.0)、範囲外はクランプ、0以下/非有限は既定（後方互換）", () => {
-    // フィールドを持たない旧 localStorage は既定 1.0（後方互換）。
-    expect(normalizeSettings({}).speedScale).toBe(DEFAULT_SPEED_SCALE);
+  it("[UR3-8] manual/autoSpeedScale は欠損で各既定(1.0/1.8)、範囲外はクランプ、0以下/非有限は各既定", () => {
+    // 新フィールドを持たない場合は各既定（manual=1.0 / auto=1.8）。
+    expect(normalizeSettings({}).manualSpeedScale).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(normalizeSettings({}).autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
     // 範囲内はそのまま。
-    expect(normalizeSettings({ speedScale: 1.4 }).speedScale).toBe(1.4);
-    // 範囲外はクランプ。
-    expect(normalizeSettings({ speedScale: 99 }).speedScale).toBe(MAX_SPEED_SCALE);
-    expect(normalizeSettings({ speedScale: 0.01 }).speedScale).toBe(MIN_SPEED_SCALE);
-    // 0以下/非有限は既定へ。
-    expect(normalizeSettings({ speedScale: 0 }).speedScale).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSettings({ speedScale: -2 }).speedScale).toBe(DEFAULT_SPEED_SCALE);
-    expect(normalizeSettings({ speedScale: Number.NaN }).speedScale).toBe(DEFAULT_SPEED_SCALE);
+    expect(normalizeSettings({ manualSpeedScale: 1.4 }).manualSpeedScale).toBe(1.4);
+    expect(normalizeSettings({ autoSpeedScale: 2.2 }).autoSpeedScale).toBe(2.2);
+    // 範囲外はクランプ（[MIN,MAX] は manual/auto 共通）。
+    expect(normalizeSettings({ manualSpeedScale: 99 }).manualSpeedScale).toBe(MAX_SPEED_SCALE);
+    expect(normalizeSettings({ autoSpeedScale: 0.01 }).autoSpeedScale).toBe(MIN_SPEED_SCALE);
+    // 0以下/非有限は各既定へ（manual は 1.0、auto は 1.8）。
+    expect(normalizeSettings({ manualSpeedScale: 0 }).manualSpeedScale).toBe(
+      DEFAULT_MANUAL_SPEED_SCALE,
+    );
+    expect(normalizeSettings({ autoSpeedScale: -2 }).autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    expect(normalizeSettings({ autoSpeedScale: Number.NaN }).autoSpeedScale).toBe(
+      DEFAULT_AUTO_SPEED_SCALE,
+    );
+  });
+
+  it("[UR3-8] migration: 旧単一 speedScale は manual に継承し、auto は常に既定(1.8)へ底上げ", () => {
+    // 旧 storage（単一 speedScale=0.6）→ manual=0.6 継承・auto=1.8 底上げ。
+    const s = normalizeSettings({ speedScale: 0.6 });
+    expect(s.manualSpeedScale).toBe(0.6);
+    expect(s.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    // 旧 speedScale が範囲外でも manual は clamp 継承・auto は底上げ既定のまま。
+    const clamped = normalizeSettings({ speedScale: 99 });
+    expect(clamped.manualSpeedScale).toBe(MAX_SPEED_SCALE);
+    expect(clamped.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    // 旧 speedScale が無効値なら manual も既定(1.0)・auto は底上げ既定。
+    const invalid = normalizeSettings({ speedScale: "abc" });
+    expect(invalid.manualSpeedScale).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(invalid.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
+  });
+
+  it("[UR3-8] migration: 新フィールドがあれば旧 speedScale より優先し、旧 speedScale は無視する", () => {
+    // 新旧が混在した storage では新フィールドを採用（旧 speedScale は継承しない）。
+    const s = normalizeSettings({ speedScale: 0.6, manualSpeedScale: 1.4, autoSpeedScale: 2.2 });
+    expect(s.manualSpeedScale).toBe(1.4);
+    expect(s.autoSpeedScale).toBe(2.2);
+    // manual だけ新フィールドがある場合、manual は新値・auto は既定(1.8)へ（旧 speedScale を継承しない）。
+    const partial = normalizeSettings({ speedScale: 0.6, manualSpeedScale: 1.4 });
+    expect(partial.manualSpeedScale).toBe(1.4);
+    expect(partial.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
   });
 
   it("数値フィールドの型不一致(破損/改竄 localStorage 由来)は全て既定へ正規化する", () => {
@@ -524,12 +574,14 @@ describe("normalizeSettings", () => {
       masterVolume: true,
       autoPlayLimitMinutes: true,
       autoSpawnIntervalMs: null,
-      speedScale: [],
+      manualSpeedScale: [],
+      autoSpeedScale: {},
     });
     expect(s.masterVolume).toBe(DEFAULT_MASTER_VOLUME);
     expect(s.autoPlayLimitMinutes).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
     expect(s.autoSpawnIntervalMs).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
-    expect(s.speedScale).toBe(DEFAULT_SPEED_SCALE);
+    expect(s.manualSpeedScale).toBe(DEFAULT_MANUAL_SPEED_SCALE);
+    expect(s.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
   });
 });
 
@@ -546,7 +598,8 @@ describe("serializeSettings / parseSettings", () => {
       autoPlayLimitMinutes: 10,
       customCritterImageId: "critter-xyz",
       autoDisabledTypes: ["foxtail", "insect"],
-      speedScale: 1.8,
+      manualSpeedScale: 1.8,
+      autoSpeedScale: 2.2,
     };
     const restored = parseSettings(serializeSettings(original));
     expect(restored).toEqual(original);
@@ -559,14 +612,15 @@ describe("serializeSettings / parseSettings", () => {
       "autoDisabledTypes",
       "autoPlayLimitMinutes",
       "autoSpawnIntervalMs",
+      "autoSpeedScale",
       "background",
       "customCritterImageId",
       "hideCursor",
+      "manualSpeedScale",
       "manualTypeId",
       "masterVolume",
       "mode",
       "muted",
-      "speedScale",
     ]);
     expect(Object.keys(parsed.background as object).sort()).toEqual(["color", "imageId", "type"]);
   });
@@ -593,7 +647,8 @@ describe("serializeSettings / parseSettings", () => {
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
       autoDisabledTypes: [],
-      speedScale: DEFAULT_SPEED_SCALE,
+      manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
+      autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
     });
   });
 

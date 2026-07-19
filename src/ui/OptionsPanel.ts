@@ -1,9 +1,15 @@
 import type { AudioManager } from "../audio/AudioManager";
 import { MANUAL_TARGETS } from "../settings/manualTargets";
 import type { SettingsStore } from "../settings/SettingsStore";
-import type { AppMode, AppSettings, BackgroundSettings } from "../settings/settingsData";
+import type {
+  AppMode,
+  AppSettings,
+  BackgroundSettings,
+  SpeedScaleOption,
+} from "../settings/settingsData";
 import {
   AUTO_PLAY_LIMIT_OPTIONS_MINUTES,
+  AUTO_SPEED_SCALE_OPTIONS,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
   SPEED_SCALE_OPTIONS,
@@ -155,8 +161,10 @@ export class OptionsPanel {
   private readonly modeSelect: HTMLSelectElement;
   /** [UR-4] 操作するもの select（マウスモードタブ。常時編集可）。 */
   private readonly manualTypeSelect: HTMLSelectElement;
-  /** 動きの速さ select（共通タブ。manual/auto 両モードに効く）。 */
-  private readonly speedSelect: HTMLSelectElement;
+  /** [UR3-8] マウス操作モードの動きの速さ select（マウスモードタブ）。 */
+  private readonly manualSpeedSelect: HTMLSelectElement;
+  /** [UR3-8] 動画モード(auto)の動きの速さ select（動画モードタブ。底上げ済み選択肢）。 */
+  private readonly autoSpeedSelect: HTMLSelectElement;
   private readonly intervalInput: HTMLInputElement;
   private readonly intervalValue: HTMLSpanElement;
   private readonly playLimitSelect: HTMLSelectElement;
@@ -241,26 +249,48 @@ export class OptionsPanel {
     });
     modeRow.append(modeLabel, modeSelect);
 
-    // 動きの速さ（manual/auto 両モードに効くため共通タブ）。change → settings.setSpeedScale。
-    const speedRow = document.createElement("div");
-    speedRow.className = "cd-options-row";
-    const speedLabel = document.createElement("label");
-    speedLabel.className = "cd-options-label";
-    speedLabel.textContent = "動きの速さ";
-    speedLabel.htmlFor = "cd-speed-select";
-    const speedSelect = document.createElement("select");
-    speedSelect.id = "cd-speed-select";
-    speedSelect.className = "cd-options-select";
+    // [UR3-8] 動きの速さは mode 別に設定する（マウス操作モード用・動画モード用を各モードタブへ）。
+    // マウス操作モード用: SPEED_SCALE_OPTIONS（従来据置）。change → settings.setManualSpeedScale。
+    const manualSpeedRow = document.createElement("div");
+    manualSpeedRow.className = "cd-options-row";
+    const manualSpeedLabel = document.createElement("label");
+    manualSpeedLabel.className = "cd-options-label";
+    manualSpeedLabel.textContent = "動きの速さ";
+    manualSpeedLabel.htmlFor = "cd-manual-speed-select";
+    const manualSpeedSelect = document.createElement("select");
+    manualSpeedSelect.id = "cd-manual-speed-select";
+    manualSpeedSelect.className = "cd-options-select";
     for (const opt of SPEED_SCALE_OPTIONS) {
       const option = document.createElement("option");
       option.value = String(opt.value);
       option.textContent = opt.label;
-      speedSelect.appendChild(option);
+      manualSpeedSelect.appendChild(option);
     }
-    speedSelect.addEventListener("change", () => {
-      this.settings.setSpeedScale(Number(speedSelect.value));
+    manualSpeedSelect.addEventListener("change", () => {
+      this.settings.setManualSpeedScale(Number(manualSpeedSelect.value));
     });
-    speedRow.append(speedLabel, speedSelect);
+    manualSpeedRow.append(manualSpeedLabel, manualSpeedSelect);
+
+    // 動画モード用: AUTO_SPEED_SCALE_OPTIONS（底上げ済み・標準=1.8）。change → settings.setAutoSpeedScale。
+    const autoSpeedRow = document.createElement("div");
+    autoSpeedRow.className = "cd-options-row";
+    const autoSpeedLabel = document.createElement("label");
+    autoSpeedLabel.className = "cd-options-label";
+    autoSpeedLabel.textContent = "動きの速さ";
+    autoSpeedLabel.htmlFor = "cd-auto-speed-select";
+    const autoSpeedSelect = document.createElement("select");
+    autoSpeedSelect.id = "cd-auto-speed-select";
+    autoSpeedSelect.className = "cd-options-select";
+    for (const opt of AUTO_SPEED_SCALE_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = String(opt.value);
+      option.textContent = opt.label;
+      autoSpeedSelect.appendChild(option);
+    }
+    autoSpeedSelect.addEventListener("change", () => {
+      this.settings.setAutoSpeedScale(Number(autoSpeedSelect.value));
+    });
+    autoSpeedRow.append(autoSpeedLabel, autoSpeedSelect);
 
     // [UR-4] 操作するもの（マウス操作モードで追従させる種別）。マウスモードタブへ。常時編集可。
     // change → settings.setManualTypeId（永続化＋購読で manualMode.setManualType へ実配線）。
@@ -516,9 +546,10 @@ export class OptionsPanel {
     // タブ組み立て（3 タブ＝共通/マウスモード/動画モード）。各セクションを対応パネルへ。
     // =========================================================================
 
-    // --- 共通タブ: 動作(モード/動きの速さ)・表示・音量・背景・オブジェクト ---
+    // --- 共通タブ: 動作(モード)・表示・音量・背景・オブジェクト ---
+    // [UR3-8] 動きの速さは mode 別になったため共通タブから外し、各モードタブへ配置する。
     const behaviorSection = createSection("動作");
-    behaviorSection.append(modeRow, speedRow);
+    behaviorSection.append(modeRow);
     const displaySection = createSection("表示");
     displaySection.appendChild(hideCursorRow);
     if (fullscreenRow) {
@@ -543,17 +574,24 @@ export class OptionsPanel {
       helpSection,
     );
 
-    // --- マウスモードタブ: 操作するもの ---
+    // --- マウスモードタブ: 操作するもの・動き(速さ) ---
     const manualSection = createSection("操作対象");
     manualSection.appendChild(manualTypeRow);
+    // [UR3-8] マウス操作モードの動きの速さ（従来の選択肢を据置）。
+    const manualMotionSection = createSection("動き");
+    manualMotionSection.appendChild(manualSpeedRow);
     const manualPanel = this.createTabPanel(1);
-    manualPanel.appendChild(manualSection);
+    manualPanel.append(manualSection, manualMotionSection);
 
-    // --- 動画モードタブ: 出現(プリセット/出現間隔)・出現する種類・遊びすぎ防止 ---
+    // --- 動画モードタブ: 動き(速さ)・出現(プリセット/出現間隔)・出現する種類・遊びすぎ防止 ---
+    // [UR3-8] 動画モードの動きの速さ（底上げ済み）。要望「動画モードが全体的に遅い」への主対応のため
+    // タブ先頭に置いて発見しやすくする。
+    const autoMotionSection = createSection("動き");
+    autoMotionSection.appendChild(autoSpeedRow);
     const spawnSection = createSection("出現");
     spawnSection.append(presetRow, intervalRow);
     const autoPanel = this.createTabPanel(2);
-    autoPanel.appendChild(spawnSection);
+    autoPanel.append(autoMotionSection, spawnSection);
     // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
     if (typeRows.length > 0) {
       const typesSection = createSection("出現する種類");
@@ -585,7 +623,8 @@ export class OptionsPanel {
     this.hideCursorInput = hideCursorInput;
     this.modeSelect = modeSelect;
     this.manualTypeSelect = manualTypeSelect;
-    this.speedSelect = speedSelect;
+    this.manualSpeedSelect = manualSpeedSelect;
+    this.autoSpeedSelect = autoSpeedSelect;
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
     this.playLimitSelect = playLimitSelect;
@@ -806,7 +845,8 @@ export class OptionsPanel {
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
     this.syncManualType(settings.manualTypeId);
-    this.syncSpeed(settings.speedScale);
+    this.syncSpeed(this.manualSpeedSelect, SPEED_SCALE_OPTIONS, settings.manualSpeedScale);
+    this.syncSpeed(this.autoSpeedSelect, AUTO_SPEED_SCALE_OPTIONS, settings.autoSpeedScale);
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
@@ -815,13 +855,18 @@ export class OptionsPanel {
   }
 
   /**
-   * 動きの速さ select を現在値へ復元する。プリセット外の永続値でも壊れないよう、
-   * SPEED_SCALE_OPTIONS の中から数値が最も近い選択肢を選ぶ（一致があればそれが最近傍）。
+   * [UR3-8] 動きの速さ select を現在値へ復元する（manual/auto 共通ヘルパ）。プリセット外の永続値でも
+   * 壊れないよう、渡した選択肢群の中から数値が最も近いものを選ぶ（一致があればそれが最近傍）。
+   * manual は SPEED_SCALE_OPTIONS・auto は AUTO_SPEED_SCALE_OPTIONS を渡す。
    */
-  private syncSpeed(speedScale: number): void {
-    let best = SPEED_SCALE_OPTIONS[0];
+  private syncSpeed(
+    select: HTMLSelectElement,
+    options: readonly SpeedScaleOption[],
+    speedScale: number,
+  ): void {
+    let best = options[0];
     let bestDist = Math.abs(best.value - speedScale);
-    for (const opt of SPEED_SCALE_OPTIONS) {
+    for (const opt of options) {
       const dist = Math.abs(opt.value - speedScale);
       if (dist < bestDist) {
         best = opt;
@@ -829,8 +874,8 @@ export class OptionsPanel {
       }
     }
     const text = String(best.value);
-    if (this.speedSelect.value !== text) {
-      this.speedSelect.value = text;
+    if (select.value !== text) {
+      select.value = text;
     }
   }
 

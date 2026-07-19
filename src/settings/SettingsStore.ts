@@ -10,6 +10,8 @@ import {
   clampPlayLimitMinutes,
   clampSpawnInterval,
   clampVolume,
+  DEFAULT_AUTO_SPEED_SCALE,
+  DEFAULT_MANUAL_SPEED_SCALE,
   normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeHideCursor,
@@ -63,7 +65,8 @@ export class SettingsStore {
       autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
       customCritterImageId: this.state.customCritterImageId,
       autoDisabledTypes: [...this.state.autoDisabledTypes],
-      speedScale: this.state.speedScale,
+      manualSpeedScale: this.state.manualSpeedScale,
+      autoSpeedScale: this.state.autoSpeedScale,
     };
   }
 
@@ -205,11 +208,20 @@ export class SettingsStore {
   }
 
   /**
-   * 動きの速さの全体倍率を設定する（[MIN,MAX] にクランプ／非有限・0以下は既定へ。永続化＋通知）。
-   * manual/auto 両モードに効く。既定 1.0 で現状と同一挙動。
+   * [UR3-8] マウス操作モードの動きの速さ倍率を設定する（[MIN,MAX] にクランプ／非有限・0以下は
+   * 既定 1.0 へ。永続化＋通知）。auto とは独立。main の購読が manualMode.setSpeedScale へ実配線する。
    */
-  setSpeedScale(value: number): void {
-    this.state.speedScale = normalizeSpeedScale(value);
+  setManualSpeedScale(value: number): void {
+    this.state.manualSpeedScale = normalizeSpeedScale(value, DEFAULT_MANUAL_SPEED_SCALE);
+    this.commit();
+  }
+
+  /**
+   * [UR3-8] 動画モード(auto)の動きの速さ倍率を設定する（[MIN,MAX] にクランプ／非有限・0以下は
+   * 既定 1.8 へ。永続化＋通知）。manual とは独立。main の購読が autoMode.setSpeedScale へ実配線する。
+   */
+  setAutoSpeedScale(value: number): void {
+    this.state.autoSpeedScale = normalizeSpeedScale(value, DEFAULT_AUTO_SPEED_SCALE);
     this.commit();
   }
 

@@ -66,10 +66,17 @@ export interface AppSettings {
    */
   autoDisabledTypes: string[];
   /**
-   * 画面内オブジェクトの動きの速さの全体倍率（既定 1.0＝現状同一）。manual/auto 両モードに効く。
+   * [UR3-8] マウス操作モードの動きの速さの全体倍率（既定 1.0＝従来同一）。
    * Critter.update が dt に乗じて全 movement へ均一適用する（出現頻度＝spawn 間隔とは独立）。
+   * auto モードとは独立に設定・永続化する（動画モードは別倍率＝autoSpeedScale）。
    */
-  speedScale: number;
+  manualSpeedScale: number;
+  /**
+   * [UR3-8] 動画モード(auto)の動きの速さの全体倍率（既定 1.8＝従来の「とてもはやい」相当へ底上げ）。
+   * 動画モードは全体的に速い方が映えるため manual と別倍率にし、既定を底上げする。
+   * 旧単一 speedScale からの migration では auto はこの既定(1.8)を採る（旧storageでも底上げ）。
+   */
+  autoSpeedScale: number;
 }
 
 /** 既定の背景色（単色 白）。 */
@@ -95,11 +102,16 @@ export const MAX_AUTO_PLAY_LIMIT_MINUTES = 180;
 /** UI に並べる遊びすぎ防止の選択肢(分)。0＝なし（OFF）。 */
 export const AUTO_PLAY_LIMIT_OPTIONS_MINUTES: readonly number[] = [0, 5, 10, 15, 30];
 
-/** 動きの速さ倍率の既定値（1.0＝現状と完全に同一）。 */
-export const DEFAULT_SPEED_SCALE = 1.0;
-/** 動きの速さ倍率の下限（永続値の暴走ガード）。 */
+/** [UR3-8] マウス操作モードの動きの速さ倍率の既定値（1.0＝従来と完全に同一）。 */
+export const DEFAULT_MANUAL_SPEED_SCALE = 1.0;
+/**
+ * [UR3-8] 動画モード(auto)の動きの速さ倍率の既定値（1.8＝従来の「とてもはやい」相当へ底上げ）。
+ * 動画モードは全体的に速い方が映えるため既定を底上げする（要望「旧とてもはやい→標準」）。
+ */
+export const DEFAULT_AUTO_SPEED_SCALE = 1.8;
+/** 動きの速さ倍率の下限（永続値の暴走ガード）。manual/auto 共通。 */
 export const MIN_SPEED_SCALE = 0.3;
-/** 動きの速さ倍率の上限（永続値の暴走ガード）。 */
+/** 動きの速さ倍率の上限（永続値の暴走ガード）。manual/auto 共通。 */
 export const MAX_SPEED_SCALE = 2.5;
 
 /** UI 用の動きの速さ倍率選択肢（ラベルと値）。 */
@@ -108,12 +120,23 @@ export interface SpeedScaleOption {
   value: number;
 }
 
-/** UI に並べる動きの速さの選択肢。value は [MIN,MAX] 内。標準=1.0 が既定。 */
+/** UI に並べるマウス操作モードの動きの速さの選択肢。value は [MIN,MAX] 内。標準=1.0 が既定。 */
 export const SPEED_SCALE_OPTIONS: readonly SpeedScaleOption[] = [
   { label: "ゆっくり", value: 0.6 },
   { label: "標準", value: 1.0 },
   { label: "はやい", value: 1.4 },
   { label: "とてもはやい", value: 1.8 },
+];
+
+/**
+ * [UR3-8] UI に並べる動画モード(auto)の動きの速さの選択肢。全体を底上げし value は [MIN,MAX] 内。
+ * 「標準」＝1.8（＝従来の manual「とてもはやい」相当・既定）。要望「動画モードが全体的に遅い」への対応。
+ */
+export const AUTO_SPEED_SCALE_OPTIONS: readonly SpeedScaleOption[] = [
+  { label: "ゆっくり", value: 1.4 },
+  { label: "標準", value: 1.8 },
+  { label: "はやい", value: 2.2 },
+  { label: "とてもはやい", value: 2.5 },
 ];
 
 /** `#rgb` / `#rrggbb`（大小文字可）を受理する正規表現。 */
@@ -242,12 +265,17 @@ export function clampPlayLimitMinutes(value: unknown): number {
 
 /**
  * 動きの速さ倍率を正規化する。有限数・数値文字列のみ受理し、>0 なら [MIN,MAX] にクランプ。
- * 型不一致（boolean/null/配列/オブジェクト/空文字）・非有限・0以下・欠損は既定(1.0)へフォールバックする。
+ * 型不一致（boolean/null/配列/オブジェクト/空文字）・非有限・0以下・欠損は fallback へフォールバックする。
+ * [UR3-8] fallback は manual/auto で既定が異なる（manual=1.0 / auto=1.8）ため引数で受ける。
+ * 既定は manual 相当(1.0)。
  */
-export function normalizeSpeedScale(value: unknown): number {
+export function normalizeSpeedScale(
+  value: unknown,
+  fallback: number = DEFAULT_MANUAL_SPEED_SCALE,
+): number {
   const n = coerceFiniteNumber(value);
   if (n === null || n <= 0) {
-    return DEFAULT_SPEED_SCALE;
+    return fallback;
   }
   return n < MIN_SPEED_SCALE ? MIN_SPEED_SCALE : n > MAX_SPEED_SCALE ? MAX_SPEED_SCALE : n;
 }
@@ -269,7 +297,8 @@ export function createDefaultSettings(): AppSettings {
     autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
     customCritterImageId: null,
     autoDisabledTypes: [],
-    speedScale: DEFAULT_SPEED_SCALE,
+    manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
+    autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
   };
 }
 
@@ -289,7 +318,8 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   customCritterImageId: null,
   autoDisabledTypes: Object.freeze([] as string[]) as string[],
-  speedScale: DEFAULT_SPEED_SCALE,
+  manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
+  autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
 }) as AppSettings;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -313,6 +343,22 @@ export function normalizeSettings(raw: unknown): AppSettings {
       ? obj.customCritterImageId
       : null;
 
+  // [UR3-8] 動きの速さの mode 別 migration（reload 退行防止）:
+  //  - 新フィールド(manual/autoSpeedScale)があればそれを各既定で正規化。
+  //  - manual が無く旧単一 speedScale があれば manual はそれを継承（従来の manual 挙動を保つ）。
+  //  - auto は旧 speedScale を継承せず常に既定 1.8 へ底上げ（旧storageでも動画モードを速くする要望）。
+  //  - どちらも無ければ各既定（manual=1.0 / auto=1.8）。
+  const manualSpeedScale =
+    obj.manualSpeedScale !== undefined
+      ? normalizeSpeedScale(obj.manualSpeedScale, DEFAULT_MANUAL_SPEED_SCALE)
+      : obj.speedScale !== undefined
+        ? normalizeSpeedScale(obj.speedScale, DEFAULT_MANUAL_SPEED_SCALE)
+        : DEFAULT_MANUAL_SPEED_SCALE;
+  const autoSpeedScale =
+    obj.autoSpeedScale !== undefined
+      ? normalizeSpeedScale(obj.autoSpeedScale, DEFAULT_AUTO_SPEED_SCALE)
+      : DEFAULT_AUTO_SPEED_SCALE;
+
   return {
     background: { type, color, imageId },
     masterVolume: clampVolume(obj.masterVolume),
@@ -324,7 +370,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
     autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
     customCritterImageId,
     autoDisabledTypes: normalizeAutoDisabledTypes(obj.autoDisabledTypes),
-    speedScale: normalizeSpeedScale(obj.speedScale),
+    manualSpeedScale,
+    autoSpeedScale,
   };
 }
 
@@ -345,7 +392,8 @@ export function serializeSettings(settings: AppSettings): string {
     autoPlayLimitMinutes: settings.autoPlayLimitMinutes,
     customCritterImageId: settings.customCritterImageId,
     autoDisabledTypes: [...settings.autoDisabledTypes],
-    speedScale: settings.speedScale,
+    manualSpeedScale: settings.manualSpeedScale,
+    autoSpeedScale: settings.autoSpeedScale,
   };
   return JSON.stringify(plain);
 }
