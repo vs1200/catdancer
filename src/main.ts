@@ -6,7 +6,12 @@ import { textureFromImageWithin } from "./app/imageTexture";
 import { clientToWorld, PointerInput } from "./app/PointerInput";
 import { DEFAULT_WORLD_MARGIN, Scene } from "./app/Scene";
 import { AudioManager } from "./audio/AudioManager";
-import { MOUSE_SQUEAK_ID, registerCritterSounds } from "./audio/sounds";
+import {
+  loadCritterSamples,
+  MOUSE_SCURRY_ID,
+  MOUSE_SQUEAK_ID,
+  registerCritterSounds,
+} from "./audio/sounds";
 import {
   getCritterType,
   hasCritterType,
@@ -69,6 +74,10 @@ async function bootstrap(): Promise<void> {
   });
   registerCritterSounds(audio);
   audio.attachAutoResume(window);
+  // [UR-3] ネズミの走行音/鳴き声をユーザー提供の実録サンプルへ差し替える（合成→サンプル）。
+  // 走行ループ(createLoop)を張る switchTo より前に await して、最初からサンプル版で鳴らす。
+  // 内部で例外を握りつぶす設計なので、ロード失敗でも起動失敗フォールバックには波及せず合成SEが残る。
+  await loadCritterSamples(audio);
 
   // 種別レジストリへ登録（ネズミ＋dangle系: 猫じゃらし/おもちゃ）。
   // 登録済み全種別の hideRadius から margin を決める（本体＋尻尾/揺れを隠せる幅）。
@@ -295,12 +304,16 @@ async function bootstrap(): Promise<void> {
     applyPause();
   };
 
-  // 捕獲フィードバック（auto 専用）: canvas のタップ/クリックで、当たった動くオブジェクトを
-  // 素早く逃がし（画面外へ→despawn）反応SEを鳴らす。auto かつパネルが閉じている時のみ有効
-  // （manual はネズミがカーソル追従なので対象外／パネル開時は backdrop が捕らえるが二重の保険）。
+  // canvas のタップ/クリックのプレイ操作。パネル開/自動停止中は無視（オーバーレイ/backdrop が受ける）。
+  // - manual: [UR-3] クリック(タップ)でネズミの鳴き声を鳴らす（SqueakScheduler の断続発火に加えた即時発火）。
+  //   pointerdown は信頼済みユーザージェスチャなので AudioContext の resume 契機にもなる（playOneShot が resume を試みる）。
+  // - auto: 当たった動くオブジェクトを素早く逃がし（画面外へ→despawn）反応SEを鳴らす。空きスペースは無反応。
   app.canvas.addEventListener("pointerdown", (event) => {
-    // 自動停止中はタップで逃走させない（オーバーレイが前面で受けるが二重の保険）。
-    if (currentModeName !== "auto" || panelOpen || autoStoppedByTimer) {
+    if (panelOpen || autoStoppedByTimer) {
+      return;
+    }
+    if (currentModeName === "manual") {
+      audio.playOneShot(MOUSE_SQUEAK_ID);
       return;
     }
     const p = clientToWorld(app.canvas, app.viewport, event.clientX, event.clientY);
@@ -523,6 +536,11 @@ async function bootstrap(): Promise<void> {
       master: () => audio.masterVolume,
       muted: () => audio.muted,
       squeak: () => audio.playOneShot(MOUSE_SQUEAK_ID),
+      // [UR-3] サンプル差し替えの客観検証: 登録済みサンプルの id→duration[]（decode 成功と長さの確認）。
+      sampleInfo: () => audio.sampleInfo(),
+      // [UR-3] 直近に鳴らしたサンプル index（ランダム選択が複数種に散るかの確認: squeak=鳴き声 / scurry=走行）。
+      lastSqueakIndex: () => audio.getLastSampleIndex(MOUSE_SQUEAK_ID),
+      lastScurryIndex: () => audio.getLastSampleIndex(MOUSE_SCURRY_ID),
     };
   }
 
