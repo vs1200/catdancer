@@ -4,10 +4,9 @@ import type { AudioSink } from "../audio/AudioManager";
 import { CritterAudioController } from "../audio/CritterAudioController";
 import { type CritterAudioState, driveForType, groupMaxSpeedByType } from "../audio/perTypeLevels";
 import { CATCH_ID } from "../audio/sounds";
-import type { Critter } from "../critters/Critter";
-import { spawnCritter } from "../critters/Critter";
+import type { Critter, SpawnCritterParams } from "../critters/Critter";
+import { CritterPopulation } from "../critters/CritterPopulation";
 import { getCritterType } from "../critters/registry";
-import { hasExitedWorld } from "../movement/CrossMovement";
 import type { MovementContext } from "../movement/Movement";
 import type { Mode } from "./Mode";
 import { SpawnScheduler } from "./spawnScheduler";
@@ -15,16 +14,6 @@ import { weightedIndex } from "./weightedChoice";
 
 /** 同時に存在できる critter 数の上限（頭打ち＝despawn とセットでリークを防ぐ）。 */
 const DEFAULT_MAX_ACTIVE = 12;
-
-/** タップ当たり判定の半径係数（critter の最大辺 size に対する比）。 */
-const HIT_RADIUS_FACTOR = 0.6;
-/** タップ当たり判定の最小半径(px)。小さい critter でも指先が当たる下限。 */
-const MIN_HIT_RADIUS = 28;
-
-/** critter の当たり半径(px)。size ベース＋指先が当たる下限。 */
-function hitRadius(size: number): number {
-  return Math.max(size * HIT_RADIUS_FACTOR, MIN_HIT_RADIUS);
-}
 
 /** AutoMode で出現させる種別 1 つぶんの設定。 */
 export interface AutoModeEntry {
@@ -49,6 +38,11 @@ export interface AutoModeDeps {
   maxActive?: number;
   /** 乱数源（テスト差し替え用。既定 Math.random）。 */
   rng?: () => number;
+  /**
+   * critter ファクトリ（テスト差し替え用。既定は spawnCritter）。
+   * {@link CritterPopulation} へそのまま渡す唯一の seam。本番は既定のままで挙動不変。
+   */
+  createCritter?: (params: SpawnCritterParams) => Critter;
 }
 
 /**
@@ -56,10 +50,10 @@ export interface AutoModeDeps {
  * 乱数で選んで画面外(world 端)から spawn し、種別ごとの Movement（mouse=CrossMovement で横断,
  * foxtail/toys=DangleMovement で揺れて誘い縁へ退場）で動かし、world 外へ抜けたら despawn する。
  *
- * spawn/despawn 基盤（v2 から継続）:
+ * spawn/despawn 基盤（v2 から継続。RF-S1a で {@link CritterPopulation} へ委譲）:
  * - 同時数を maxActive で頭打ちにし、despawn とセットで critter 数が単調増加しないようにする。
- * - despawn 述語は 1 度だけ束縛（this.shouldDespawn）して毎フレームの new を避ける。
- * - 生成物は全て Scene のアクティブ集合に載せ、stop で despawnAll し完全解放する。
+ * - 生成/追跡/world 退出・expired despawn/hit-test は Population が担う（AutoMode は spawn 方針のみ）。
+ * - 生成物は全て Population 経由で Scene のアクティブ集合に載せ、stop で despawnAll し完全解放する。
  * - 種別ごとの spawn 計画・Movement は CritterType.createAutoSpawn に委譲（種別追加が容易）。
  *
  * SE は種別別ルーティング: sounds を持つ種別ごとに CritterAudioController を 1 本保持し
@@ -72,6 +66,12 @@ export class AutoMode implements Mode {
   private readonly deps: AutoModeDeps;
   private readonly scheduler: SpawnScheduler;
   private readonly ctx: MovementContext;
+  /**
+   * 複数 critter のライフサイクル（active list 管理・自己修復 prune・world 退出/expired despawn・
+   * tap hit-test）を担う Facade。AutoMode は「いつ/どう spawn するか」だけを持ち、生成/追跡/破棄/
+   * ヒットテストは Population へ委譲する（Insect と同一機構の一点集約 = RF-S1a）。
+   */
+  private readonly population: CritterPopulation;
   /** 種別別SEコントローラ（sounds を持つ種別のみ）。start/stop/駆動を種別ごとに行う。 */
   private readonly audioCtrls = new Map<string, CritterAudioController>();
   /** 毎フレームの種別グループ化で使う再利用バッファ（配列を作り直さない）。 */
@@ -86,15 +86,16 @@ export class AutoMode implements Mode {
   private readonly spawnWeightsBuf: number[] = [];
   private running = false;
   private paused = false;
-  /** 毎フレーム再生成しないよう束縛した despawn 述語。 */
-  private readonly shouldDespawn = (critter: Critter): boolean =>
-    hasExitedWorld(critter.state.position, this.deps.scene.worldBounds) || critter.hasExpired;
 
   constructor(deps: AutoModeDeps) {
     this.deps = deps;
     this.rng = deps.rng ?? Math.random;
     this.maxActive = deps.maxActive ?? DEFAULT_MAX_ACTIVE;
     this.weights = deps.entries.map((e) => e.weight);
+    this.population = new CritterPopulation({
+      scene: deps.scene,
+      createCritter: deps.createCritter,
+    });
     this.scheduler = new SpawnScheduler({ intervalMs: deps.intervalMs });
     // speedScale=1 で明示初期化（省略時1扱いだが意図を明確化）。update は world のみ上書きし
     // speedScale は触らないため、mutate 再利用の ctx に設定は持続する。
@@ -146,7 +147,7 @@ export class AutoMode implements Mode {
       return;
     }
     this.running = false;
-    this.deps.scene.despawnAll();
+    this.population.despawnAll();
     for (const ctrl of this.audioCtrls.values()) {
       ctrl.stop();
     }
@@ -229,17 +230,17 @@ export class AutoMode implements Mode {
     for (let i = 0; i < due; i++) {
       this.spawnOne();
     }
-    // 2) 全 critter を更新（配列を作り直さない）。
+    // 2) 全 critter を更新（自己修復 prune → updateAll。配列を作り直さない）。
     this.ctx.world = scene.worldBounds;
-    scene.updateAll(dtSeconds, this.ctx);
-    // 3) world 外へ抜けたものを despawn（完全破棄）。
-    scene.despawnWhere(this.shouldDespawn);
+    this.population.update(dtSeconds, this.ctx);
+    // 3) world 外へ抜けた／退場アニメ完了のものを despawn（完全破棄）。
+    this.population.reapExited(scene.worldBounds);
     // 4) SE: 種別別ルーティング。画面上の critter を typeId でグループ化し、各コントローラを
     //    「その種別の在否(present)＋最大速度」で駆動する。present でない種別は無音（他種別が居ても
     //    その種別のSEは鳴らさない）。
     const buf = this.audioStateBuf;
     buf.length = 0;
-    const list = scene.critterList;
+    const list = this.population.list;
     for (let i = 0; i < list.length; i++) {
       buf.push(list[i].state);
     }
@@ -251,10 +252,10 @@ export class AutoMode implements Mode {
   }
 
   /**
-   * 捕獲フィードバック: world 座標 (x,y) を全 critter とヒットテストし、当たった中で最も近い 1 体を
-   * その点から逃がし（{@link Critter.flee}）、反応SEを鳴らす。running かつ not paused の時のみ有効。
+   * 捕獲フィードバック: world 座標 (x,y) を {@link CritterPopulation.hitTest} でヒットテストし、当たった
+   * 中で最も近い 1 体をその点から逃がし（{@link Critter.flee}）、反応SEを鳴らす。running かつ not paused の時のみ有効。
    *
-   * - 当たり判定は各 critter 中心との距離が当たり半径（{@link hitRadius} = size ベース＋指先下限）以内か。
+   * - 当たり判定（当たり半径 = size ベース＋指先下限）は Population.hitTest と同一ロジック（定数含め一致）。
    * - 反応SE: その種別に voice があれば voice（ネズミの squeak 等）、無ければ汎用キャッチSE（{@link CATCH_ID}）。
    * - 逃げた critter は FleeMovement で world 外へ抜け、既存 despawn 経路で消える（新経路は作らない）。
    *
@@ -264,20 +265,7 @@ export class AutoMode implements Mode {
     if (!this.running || this.paused) {
       return false;
     }
-    const list = this.deps.scene.critterList;
-    let best: Critter | null = null;
-    let bestDistSq = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i];
-      const dx = c.state.position.x - worldX;
-      const dy = c.state.position.y - worldY;
-      const distSq = dx * dx + dy * dy;
-      const radius = hitRadius(c.state.size);
-      if (distSq <= radius * radius && distSq < bestDistSq) {
-        best = c;
-        bestDistSq = distSq;
-      }
-    }
+    const best = this.population.hitTest(worldX, worldY);
     if (!best) {
       return false;
     }
@@ -320,7 +308,7 @@ export class AutoMode implements Mode {
 
   private spawnEntry(entry: AutoModeEntry): void {
     const { scene } = this.deps;
-    if (scene.critterCount >= this.maxActive) {
+    if (this.population.count >= this.maxActive) {
       return;
     }
     const type = getCritterType(entry.typeId);
@@ -328,13 +316,12 @@ export class AutoMode implements Mode {
       return;
     }
     const plan = type.createAutoSpawn(scene.worldBounds, this.rng);
-    const critter = spawnCritter({
+    this.population.spawn({
       typeId: entry.typeId,
       bodyTexture: entry.bodyTexture,
       tailTexture: entry.tailTexture,
       movement: plan.movement,
       spawn: { position: plan.position, velocity: plan.velocity, facing: plan.facing },
     });
-    scene.add(critter);
   }
 }

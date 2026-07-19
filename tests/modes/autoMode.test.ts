@@ -5,6 +5,7 @@ import type { AudioSink } from "../../src/audio/AudioManager";
 import { CATCH_ID } from "../../src/audio/sounds";
 import type { LoopVoice } from "../../src/audio/synth";
 import { createWorldBounds } from "../../src/core/worldBounds";
+import type { Critter } from "../../src/critters/Critter";
 import type { CritterSoundSet, CritterType } from "../../src/critters/CritterType";
 import { clearCritterTypes, registerCritterType } from "../../src/critters/registry";
 import { AutoMode, type AutoModeEntry } from "../../src/modes/AutoMode";
@@ -46,18 +47,49 @@ function makeFakeAudio() {
 
 /**
  * worldBounds など AutoMode が実際に触れる面だけ持つ最小 fake Scene。
- * handleTap のテスト用に critterList を差し込めるようにする（既定は空＝従来どおり）。
+ * RF-S1a 後は spawn/despawn を {@link CritterPopulation} 経由で行うため、Scene 側に触れるのは
+ * worldBounds / add / despawn の 3 面のみ（add=population.spawn、despawn=reap/despawnAll から）。
+ * critterList は AutoMode からは参照されなくなったが、直接構築する一部テストの互換のため残す。
  */
 function makeFakeScene(critterList: unknown[] = []): Scene {
   const fake = {
     worldBounds: createWorldBounds({ width: 800, height: 600 }, 200),
-    critterCount: 0,
     critterList,
-    despawnAll: vi.fn(),
-    despawnWhere: vi.fn(),
-    updateAll: vi.fn(),
+    add: vi.fn<(c: Critter) => void>(),
+    despawn: vi.fn<(c: Critter) => void>(),
   };
   return fake as unknown as Scene;
+}
+
+/** add/despawn spy を露出した fake Scene（Population 委譲の観測用）。 */
+function makeSpyScene() {
+  const add = vi.fn<(c: Critter) => void>();
+  const despawn = vi.fn<(c: Critter) => void>();
+  const scene = {
+    worldBounds: createWorldBounds({ width: 800, height: 600 }, 200),
+    add,
+    despawn,
+  } as unknown as Scene;
+  return { scene, add, despawn };
+}
+
+/** Population へ fake critter を載せるための spawn 台車種別（createAutoSpawn を持つ）。 */
+const SPAWN_VEHICLE = "spawn-vehicle";
+
+/**
+ * createAutoSpawn を持つ最小種別。プラン内容は createCritter 差し替え時に dereference されないので
+ * ダミーで足りる（spawnEntry の `!type.createAutoSpawn` early-return を越えて population.spawn へ通す）。
+ */
+function makeSpawnableType(id: string): CritterType {
+  return {
+    ...makeType(id, {}),
+    createAutoSpawn: () => ({
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 0 },
+      facing: 1,
+      movement: { update: () => undefined },
+    }),
+  };
 }
 
 /**
@@ -216,7 +248,10 @@ describe("AutoMode SE コントローラ Map ライフサイクル", () => {
  * handleTap が触れるのは各 critter の state.position.{x,y} / state.size / state.typeId と flee のみ
  * なので、fake critter は `{ state: {...}, flee: vi.fn() }` で足りる（Pixi Sprite 不要）。
  * typeId は getCritterType で解決されるため beforeEach で登録済みの型を使う（voice 有無の両方）。
- * mode は entries なしで start() して running にする（spawnOne は weightedIndex(-1) で no-op）。
+ *
+ * RF-S1a 後 handleTap は {@link CritterPopulation.hitTest}（AutoMode 内部 population）を叩くため、
+ * fake critter は「Scene に注入」ではなく createCritter seam＋spawn 台車種別で Population へ load する。
+ * start() が spawnOne() で 1 体（queue 先頭）を、続く spawnType(SPAWN_VEHICLE) が残りを順に load する。
  */
 
 /** handleTap が触れる面だけ持つ fake critter（Pixi 不要）。flee は spy。 */
@@ -232,16 +267,26 @@ function makeCritter(typeId: string, x: number, y: number, size: number): FakeCr
   };
 }
 
-/** critterList を注入した running な AutoMode を作る（handleTap テスト用）。 */
+/**
+ * critters を Population へ load 済みの running な AutoMode を作る（handleTap テスト用）。
+ * createCritter で注入 critter を spawn 順（queue 先頭から）に返し、start()＋spawnType で
+ * ちょうど critters.length 体を Population に載せる（順序も配列どおり＝hitTest の最近傍/同点比較が一致）。
+ */
 function startedModeWith(audio: AudioSink, critters: FakeCritter[]): AutoMode {
+  const queue = [...critters];
   const mode = new AutoMode({
-    scene: makeFakeScene(critters),
-    entries: [], // handleTap は entries を使わない。start() は空 entries でも安全（spawnOne が no-op）。
+    scene: makeFakeScene(),
+    entries: [entry(SPAWN_VEHICLE)],
     audio,
     intervalMs: 1000,
     rng: () => 0,
+    createCritter: () =>
+      (queue.shift() ?? makeCritter(SPAWN_VEHICLE, 0, 0, 1)) as unknown as Critter,
   });
-  mode.start();
+  mode.start(); // spawnOne() で critters[0] を load。
+  for (let i = 1; i < critters.length; i++) {
+    mode.spawnType(SPAWN_VEHICLE); // 残りを配列順に load。
+  }
   return mode;
 }
 
@@ -254,6 +299,8 @@ describe("AutoMode.handleTap 捕獲フィードバック", () => {
     // voice を持つ種別と、voice を持たない種別（→ CATCH_ID フォールバック）の両方を用意する。
     registerCritterType(makeType(VOICE_TYPE, { voice: VOICE_ID }));
     registerCritterType(makeType(PLAIN_TYPE, {}));
+    // fake critter を Population へ載せる spawn 台車種別（createAutoSpawn を持つ）。
+    registerCritterType(makeSpawnableType(SPAWN_VEHICLE));
   });
 
   afterEach(() => {
@@ -390,5 +437,136 @@ describe("AutoMode.handleTap 捕獲フィードバック", () => {
     expect(c.flee).not.toHaveBeenCalled();
     expect(audio.playOneShot).not.toHaveBeenCalled();
     mode.stop();
+  });
+});
+
+/**
+ * [RF-S1a] AutoMode → CritterPopulation 委譲の不変条件（Pixi 非依存）。
+ *
+ * AutoMode が spawn/cap/update+reap/stop を Population 経由で行うことを、Scene 境界の add/despawn spy と
+ * critter の update spy で観測する。ヒットロジック等の内部等価は critterPopulation.test / handleTap 側で
+ * 既に固定しているため、ここでは「AutoMode が Population へ正しく配線されているか」に集中する。
+ */
+
+/** update/reap まで通る fuller fake critter（Pixi 非依存）。SE 集計用に typeId/velocity も持つ。 */
+interface DelegFakeCritter {
+  state: {
+    position: { x: number; y: number };
+    size: number;
+    typeId: string;
+    velocity: { x: number; y: number };
+  };
+  destroyed: boolean;
+  hasExpired: boolean;
+  update: ReturnType<typeof vi.fn<(dt: number, ctx: unknown) => void>>;
+}
+
+function makeDelegCritter(opts?: {
+  x?: number;
+  y?: number;
+  hasExpired?: boolean;
+}): DelegFakeCritter {
+  return {
+    state: {
+      position: { x: opts?.x ?? 400, y: opts?.y ?? 300 },
+      size: 100,
+      typeId: SPAWN_VEHICLE,
+      velocity: { x: 0, y: 0 },
+    },
+    destroyed: false,
+    hasExpired: opts?.hasExpired ?? false,
+    update: vi.fn<(dt: number, ctx: unknown) => void>(),
+  };
+}
+
+/** SPAWN_VEHICLE のみ entries に持ち、queue の fake を spawn 順に load する AutoMode を作る。 */
+function buildDelegMode(
+  scene: Scene,
+  queue: DelegFakeCritter[],
+  opts?: { maxActive?: number },
+): AutoMode {
+  const remaining = [...queue];
+  return new AutoMode({
+    scene,
+    entries: [entry(SPAWN_VEHICLE)],
+    audio: makeFakeAudio().sink,
+    // update() でスケジュール spawn が発火しない十分大きい間隔（reap/更新の観測を汚さない）。
+    intervalMs: 100000,
+    maxActive: opts?.maxActive,
+    rng: () => 0,
+    createCritter: () => (remaining.shift() ?? makeDelegCritter()) as unknown as Critter,
+  });
+}
+
+describe("AutoMode: CritterPopulation 委譲の不変条件", () => {
+  beforeEach(() => {
+    registerCritterType(makeSpawnableType(SPAWN_VEHICLE));
+  });
+
+  afterEach(() => {
+    clearCritterTypes();
+  });
+
+  it("spawn は Population 経由で scene.add に載る（createCritter seam）", () => {
+    const { scene, add } = makeSpyScene();
+    const c = makeDelegCritter();
+    const mode = buildDelegMode(scene, [c]);
+
+    mode.spawnType(SPAWN_VEHICLE); // start() 抜きで 1 体だけ確実に spawn。
+
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(add).toHaveBeenCalledWith(c as unknown as Critter);
+  });
+
+  it("maxActive 到達で spawn を止める（cap は population.count で判定）", () => {
+    const { scene, add } = makeSpyScene();
+    const mode = buildDelegMode(
+      scene,
+      [makeDelegCritter(), makeDelegCritter(), makeDelegCritter()],
+      { maxActive: 2 },
+    );
+
+    mode.spawnType(SPAWN_VEHICLE);
+    mode.spawnType(SPAWN_VEHICLE);
+    mode.spawnType(SPAWN_VEHICLE); // 3 回目は count(2) >= maxActive(2) で早期 return。
+
+    expect(add).toHaveBeenCalledTimes(2);
+  });
+
+  it("update の reap で world 外/expired を despawn し内側は残す（update→reapExited 委譲）", () => {
+    const { scene, despawn } = makeSpyScene();
+    const inside = makeDelegCritter({ x: 400, y: 300 });
+    const exited = makeDelegCritter({ x: 100000, y: 300 });
+    const expired = makeDelegCritter({ x: 400, y: 300, hasExpired: true });
+    const mode = buildDelegMode(scene, [inside, exited, expired]);
+    mode.start(); // spawnOne() で inside を load。
+    mode.spawnType(SPAWN_VEHICLE); // exited
+    mode.spawnType(SPAWN_VEHICLE); // expired
+
+    mode.update(0.1);
+
+    expect(despawn).toHaveBeenCalledTimes(2);
+    expect(despawn).toHaveBeenCalledWith(exited as unknown as Critter);
+    expect(despawn).toHaveBeenCalledWith(expired as unknown as Critter);
+    expect(despawn).not.toHaveBeenCalledWith(inside as unknown as Critter);
+    // 生存個体は update される（reap 前に全個体を index 走査で更新）。
+    expect(inside.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("stop で全 critter を despawn（population.despawnAll = count 0 化）", () => {
+    const { scene, despawn } = makeSpyScene();
+    const mode = buildDelegMode(scene, [
+      makeDelegCritter(),
+      makeDelegCritter(),
+      makeDelegCritter(),
+    ]);
+    mode.start(); // load 1（spawnOne）。
+    mode.spawnType(SPAWN_VEHICLE); // load 2
+    mode.spawnType(SPAWN_VEHICLE); // load 3
+
+    mode.stop();
+
+    // 3 体すべてが scene.despawn され Population が空になる（despawn 数＝spawn 数）。
+    expect(despawn).toHaveBeenCalledTimes(3);
   });
 });
