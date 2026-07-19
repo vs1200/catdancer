@@ -28,6 +28,14 @@ export interface ManualControllerSnapshot {
   viewScaleY: number;
   /** 尻尾先端のワールド座標（静止/トレイル検証用）。尻尾が無ければ null。 */
   tailTip: { x: number; y: number } | null;
+  /**
+   * [UR-5b] 猫じゃらし固有の観測値（他コントローラでは未設定＝optional・QA 用）。
+   * retract=しまう係数(0..1)、base=基部(hand)の world 座標（飛び出し端の可変検証）、
+   * headRender=描画上の穂先（retract で画面外へ抜けるかの検証）。
+   */
+  retract?: number;
+  base?: { x: number; y: number };
+  headRender?: { x: number; y: number };
 }
 
 /** 操作対象 1 種別ぶんの manual 挙動。 */

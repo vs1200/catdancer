@@ -6,6 +6,13 @@ import { makeDangleType } from "./dangleType";
 export const FOXTAIL_TYPE_ID = "foxtail";
 
 /**
+ * [UR-5b] マウス操作モード専用の「手で持つ」ねこじゃらしテクスチャ URL（横向き・茎の根元=左端）。
+ * 動画(auto)モードの斜め dangle 素材 foxtail.webp とは別物で、manual foxtail のみが使う。
+ * Vite は base:"./" 環境のため BASE_URL 基点で解決する。
+ */
+export const FOXTAIL_HAND_TEXTURE_URL = `${import.meta.env.BASE_URL}assets/critters/foxtail-hand.webp`;
+
+/**
  * 猫じゃらし(エノコログサ)の揺れレンジ。「全体が大きく揺れる」を強めに。
  * 斜め構図（穂=右上/茎=左下）なので pivot は茎の根元＝左下寄り。振り子のように大きく振れて
  * 穂先が大きく動く。位置バウンドも強め（手で振っている見え方）。

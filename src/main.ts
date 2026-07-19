@@ -19,7 +19,11 @@ import {
   registerCritterType,
   unregisterCritterType,
 } from "./critters/registry";
-import { FOXTAIL_TYPE_ID, registerFoxtailType } from "./critters/types/foxtail";
+import {
+  FOXTAIL_HAND_TEXTURE_URL,
+  FOXTAIL_TYPE_ID,
+  registerFoxtailType,
+} from "./critters/types/foxtail";
 import { createImageCritterType } from "./critters/types/imageCritter";
 import { INSECT_TYPE_ID, registerInsectType } from "./critters/types/insect";
 import { MOUSE_TAIL_TEXTURE_URL, MOUSE_TYPE_ID, registerMouseType } from "./critters/types/mouse";
@@ -29,6 +33,7 @@ import { AutoMode } from "./modes/AutoMode";
 import { ManualMode } from "./modes/ManualMode";
 import type { Mode } from "./modes/Mode";
 import { FollowManualController } from "./modes/manual/FollowManualController";
+import { FoxtailManualController } from "./modes/manual/FoxtailManualController";
 import type { ManualControllerFactory } from "./modes/manual/ManualController";
 import { PlayLimitTimer } from "./modes/PlayLimitTimer";
 import { getCritterImage } from "./settings/imageStore";
@@ -110,13 +115,16 @@ async function bootstrap(): Promise<void> {
   const foxtailType = getCritterType(FOXTAIL_TYPE_ID);
   const toysType = getCritterType(TOYS_TYPE_ID);
   const insectType = getCritterType(INSECT_TYPE_ID);
-  const [bodyTexture, foxtailTexture, toysTexture, insectTexture, tailTexture] = await Promise.all([
-    Assets.load(mouseType.textureUrl),
-    Assets.load(foxtailType.textureUrl),
-    Assets.load(toysType.textureUrl),
-    Assets.load(insectType.textureUrl),
-    Assets.load(MOUSE_TAIL_TEXTURE_URL),
-  ]);
+  // [UR-5b] foxtail-hand.webp は manual foxtail の新挙動専用（auto の foxtail.webp とは別物・共有はしない）。
+  const [bodyTexture, foxtailTexture, foxtailHandTexture, toysTexture, insectTexture, tailTexture] =
+    await Promise.all([
+      Assets.load(mouseType.textureUrl),
+      Assets.load(foxtailType.textureUrl),
+      Assets.load(FOXTAIL_HAND_TEXTURE_URL),
+      Assets.load(toysType.textureUrl),
+      Assets.load(insectType.textureUrl),
+      Assets.load(MOUSE_TAIL_TEXTURE_URL),
+    ]);
 
   // ポインタ入力（ManualMode が attach/detach を占有管理する）。
   const pointerInput = new PointerInput(app.canvas, () => app.viewport);
@@ -139,7 +147,17 @@ async function bootstrap(): Promise<void> {
       });
   const manualFactories = new Map<string, ManualControllerFactory>([
     [MOUSE_TYPE_ID, makeFollowFactory(MOUSE_TYPE_ID, bodyTexture, tailTexture)],
-    [FOXTAIL_TYPE_ID, makeFollowFactory(FOXTAIL_TYPE_ID, foxtailTexture)],
+    // [UR-5b] 猫じゃらしだけは固有挙動（端から差し込んで穂をふりふり）へ差し替える。
+    // 他種別（ネズミ/おもちゃ/虫）は従来どおりカーソル追従(FollowManualController)のまま。
+    [
+      FOXTAIL_TYPE_ID,
+      () =>
+        new FoxtailManualController({
+          handTexture: foxtailHandTexture,
+          pointer: pointerInput,
+          scene,
+        }),
+    ],
     [TOYS_TYPE_ID, makeFollowFactory(TOYS_TYPE_ID, toysTexture)],
     [INSECT_TYPE_ID, makeFollowFactory(INSECT_TYPE_ID, insectTexture)],
   ]);
@@ -512,6 +530,11 @@ async function bootstrap(): Promise<void> {
           // 回転検証の人間可読補助: heading を度数化、鏡像(左半分)かどうか。
           headingDeg: (snap.heading * 180) / Math.PI,
           mirrored: snap.viewScaleY < 0,
+          // [UR-5b] 猫じゃらし固有（他種別では undefined）。distanceToPointer=バネラグ（ふりふり量）、
+          // retract=しまう係数、base=飛び出し端の可変検証、headRender=しまう時に画面外へ抜けたか。
+          retract: snap.retract,
+          base: snap.base,
+          headRender: snap.headRender,
         };
       },
       // canvas に pointermove を dispatch する検証補助（client 座標）。
