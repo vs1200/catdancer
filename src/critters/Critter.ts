@@ -152,6 +152,11 @@ export class Critter {
     return this.view.destroyed;
   }
 
+  /** 現行 movement が退場アニメを完了したか（movement 非対応なら false）。despawn 判定の OR 項。 */
+  get hasExpired(): boolean {
+    return this.movement.hasExpired?.() ?? false;
+  }
+
   update(dtSeconds: number, ctx: MovementContext): void {
     // ctx.speedScale で critter 全体を 1 つのスケール時計で動かす（movement/回頭/尻尾すべてに
     // 同じ scaledDt を渡す＝視覚的に一貫）。未指定は 1 として扱い、scale=1 なら scaledDt===dtSeconds

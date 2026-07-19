@@ -88,7 +88,7 @@ export class AutoMode implements Mode {
   private paused = false;
   /** 毎フレーム再生成しないよう束縛した despawn 述語。 */
   private readonly shouldDespawn = (critter: Critter): boolean =>
-    hasExitedWorld(critter.state.position, this.deps.scene.worldBounds);
+    hasExitedWorld(critter.state.position, this.deps.scene.worldBounds) || critter.hasExpired;
 
   constructor(deps: AutoModeDeps) {
     this.deps = deps;

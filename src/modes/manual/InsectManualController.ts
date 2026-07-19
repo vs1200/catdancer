@@ -135,7 +135,7 @@ export class InsectManualController implements ManualController {
     // 2) world 外へ抜けた虫を despawn（後方走査で in-place 除去＝配列を作り直さない）。
     for (let i = this.critters.length - 1; i >= 0; i--) {
       const c = this.critters[i];
-      if (hasExitedWorld(c.state.position, scene.worldBounds)) {
+      if (hasExitedWorld(c.state.position, scene.worldBounds) || c.hasExpired) {
         this.critters.splice(i, 1);
         scene.despawn(c);
       }

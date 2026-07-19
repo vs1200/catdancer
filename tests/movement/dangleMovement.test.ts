@@ -236,3 +236,82 @@ describe("DangleMovement", () => {
     expect(Number.isFinite(state.velocity.x)).toBe(true);
   });
 });
+
+describe("DangleMovement.hasExpired", () => {
+  it("生成直後は false（退場アニメ未完了）", () => {
+    const plan = makePlan();
+    expect(new DangleMovement(plan).hasExpired()).toBe(false);
+  });
+
+  it("dt 刻みで進め、elapsedSeconds<total は false・total 以上で true（毎フレーム一致）", () => {
+    const plan = makePlan();
+    const total = dangleTotalSeconds(plan);
+    const state = createCritterState({
+      typeId: "foxtail",
+      position: { x: plan.enter.x, y: plan.enter.y },
+      size: 360,
+    });
+    const m = new DangleMovement(plan);
+    const dt = 1 / 60;
+    // update と同じ順序で加算するので elapsed は内部 elapsedSeconds とビット一致し、境界も厳密に一致する。
+    let elapsed = 0;
+    for (let i = 0; i < Math.ceil(total / dt) + 30; i++) {
+      m.update(state, dt, ctx);
+      elapsed += dt;
+      expect(m.hasExpired()).toBe(elapsed >= total);
+    }
+    expect(m.hasExpired()).toBe(true); // 十分に total を超過した最終状態は必ず expired
+  });
+
+  it("境界: total 直前は false、total 超過で true", () => {
+    const plan = makePlan();
+    const total = dangleTotalSeconds(plan);
+    const state = createCritterState({
+      typeId: "foxtail",
+      position: { x: plan.enter.x, y: plan.enter.y },
+      size: 360,
+    });
+    const m = new DangleMovement(plan);
+    m.update(state, total - 0.01, ctx); // total 手前
+    expect(m.hasExpired()).toBe(false);
+    m.update(state, 0.02, ctx); // total 超過
+    expect(m.hasExpired()).toBe(true);
+  });
+
+  it("dt<=0 では経過が進まず expired にならない（pause 跨ぎ安全）", () => {
+    const plan = makePlan();
+    const state = createCritterState({
+      typeId: "foxtail",
+      position: { x: plan.enter.x, y: plan.enter.y },
+      size: 360,
+    });
+    const m = new DangleMovement(plan);
+    for (let i = 0; i < 1000; i++) {
+      m.update(state, 0, ctx);
+      m.update(state, -1, ctx);
+    }
+    expect(m.hasExpired()).toBe(false);
+  });
+
+  it("seeded rng の plan でも total 境界で expired へ切り替わる", () => {
+    const size = 360;
+    const plan = planDangleSpawn(
+      world,
+      seqRng([0.1, 0.5, 0.5, 0.3, 0.4, 0.6, 0.5, 0.5, 0.5, 0.5, 0.2, 0.8]),
+      DANGLE_SPAWN_DEFAULTS,
+      size,
+    );
+    const total = dangleTotalSeconds(plan);
+    const state = createCritterState({
+      typeId: "foxtail",
+      position: { x: plan.enter.x, y: plan.enter.y },
+      size,
+    });
+    const m = new DangleMovement(plan);
+    expect(m.hasExpired()).toBe(false);
+    m.update(state, total - 0.05, ctx);
+    expect(m.hasExpired()).toBe(false);
+    m.update(state, 0.1, ctx);
+    expect(m.hasExpired()).toBe(true);
+  });
+});

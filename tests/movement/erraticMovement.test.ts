@@ -400,3 +400,61 @@ describe("planErraticSpawn exit は size に依らず全 edge で world 外(desp
     });
   }
 });
+
+describe("ErraticMovement.hasExpired", () => {
+  it("生成直後は false（退場アニメ未完了）", () => {
+    const plan = makePlan();
+    expect(new ErraticMovement(plan).hasExpired()).toBe(false);
+  });
+
+  it("dt 刻みで進め、elapsedSeconds<total は false・total 以上で true（毎フレーム一致）", () => {
+    const plan = makePlan();
+    const total = erraticTotalSeconds(plan);
+    const state = stateAt(plan.enter.x, plan.enter.y);
+    const m = new ErraticMovement(plan);
+    const dt = 1 / 60;
+    // update と同じ順序で加算するので elapsed は内部 elapsedSeconds とビット一致し、境界も厳密に一致する。
+    let elapsed = 0;
+    for (let i = 0; i < Math.ceil(total / dt) + 60; i++) {
+      m.update(state, dt, ctx);
+      elapsed += dt;
+      expect(m.hasExpired()).toBe(elapsed >= total);
+    }
+    expect(m.hasExpired()).toBe(true); // 十分に total を超過した最終状態は必ず expired
+  });
+
+  it("境界: total 直前は false、total 超過で true", () => {
+    const plan = makePlan();
+    const total = erraticTotalSeconds(plan);
+    const state = stateAt(plan.enter.x, plan.enter.y);
+    const m = new ErraticMovement(plan);
+    m.update(state, total - 0.01, ctx); // total 手前
+    expect(m.hasExpired()).toBe(false);
+    m.update(state, 0.02, ctx); // total 超過
+    expect(m.hasExpired()).toBe(true);
+  });
+
+  it("dt<=0 では経過が進まず expired にならない（pause 跨ぎ安全）", () => {
+    const plan = makePlan();
+    const state = stateAt(plan.enter.x, plan.enter.y);
+    const m = new ErraticMovement(plan);
+    for (let i = 0; i < 1000; i++) {
+      m.update(state, 0, ctx);
+      m.update(state, -1, ctx);
+    }
+    expect(m.hasExpired()).toBe(false);
+  });
+
+  it("クリック出現(planErraticFromPoint)の plan でも total 境界で expired へ切り替わる", () => {
+    const start = { x: 400, y: 300 };
+    const plan = planErraticFromPoint(start, world, seqRng([]), ERRATIC_SPAWN_DEFAULTS, SIZE);
+    const total = erraticTotalSeconds(plan);
+    const state = stateAt(plan.enter.x, plan.enter.y);
+    const m = new ErraticMovement(plan);
+    expect(m.hasExpired()).toBe(false);
+    m.update(state, total - 0.05, ctx);
+    expect(m.hasExpired()).toBe(false);
+    m.update(state, 0.1, ctx);
+    expect(m.hasExpired()).toBe(true);
+  });
+});

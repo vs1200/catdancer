@@ -155,6 +155,10 @@ export class DangleMovement implements Movement {
     state.rotation = dangleAngleAt(this.plan, this.elapsedSeconds);
     state.facing = this.plan.facing;
   }
+
+  hasExpired(): boolean {
+    return this.elapsedSeconds >= dangleTotalSeconds(this.plan);
+  }
 }
 
 /** DanglePlan を rng から生成するためのレンジ（種別ごとに CritterType が持つ）。 */

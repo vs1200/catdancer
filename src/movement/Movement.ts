@@ -24,4 +24,11 @@ export interface MovementContext {
  */
 export interface Movement {
   update(state: CritterState, dtSeconds: number, ctx: MovementContext): void;
+  /**
+   * 退場アニメが完了し、以後 exit(spawn 時 world 外)に留まる movement が true を返す（optional）。
+   * 位置ベースの despawn 判定は、ウィンドウ拡大で exit 点が新 world の内側に取り込まれると
+   * 取りこぼす（凍結残留）。時間ベースのこの判定を OR して確実に despawn させる。
+   * 位置ベース/非退場の movement（Cross/MouseFollow/Flee 等）は未実装＝呼び出し側で false 扱い。
+   */
+  hasExpired?(): boolean;
 }

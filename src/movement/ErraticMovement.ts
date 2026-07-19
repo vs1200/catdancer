@@ -180,6 +180,10 @@ export class ErraticMovement implements Movement {
       state.facing = -1;
     }
   }
+
+  hasExpired(): boolean {
+    return this.elapsedSeconds >= erraticTotalSeconds(this.plan);
+  }
 }
 
 /** ErraticPlan を rng から生成するためのレンジ（種別ごとに CritterType が持つ）。 */
