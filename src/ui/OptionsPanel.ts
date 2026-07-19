@@ -13,9 +13,11 @@ import type {
 import {
   AUTO_PLAY_LIMIT_OPTIONS_MINUTES,
   AUTO_SPEED_SCALE_OPTIONS,
+  DEFAULT_OBJECT_SCALE,
   INSECT_MANUAL_PATTERN_OPTIONS,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
+  OBJECT_SCALE_OPTIONS,
   SPEED_SCALE_OPTIONS,
 } from "../settings/settingsData";
 import { SPAWN_PRESETS } from "../settings/spawnPresets";
@@ -109,7 +111,7 @@ function createHelpSection(): HTMLElement {
     ],
     [
       "操作するもの",
-      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫／任意画像）を選べます。虫を選ぶと動きパターン（クリックで出現／マウス追従）、任意画像を選ぶと使いたい画像を設定できます（任意画像は動画モードには出ません）。",
+      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫／任意画像）を選べます。虫を選ぶと動きパターン（クリックで出現／マウス追従）、任意画像を選ぶと使いたい画像を設定できます（任意画像は動画モードには出ません）。オブジェクトの大きさは「マウスモード」「動画モード」各タブの「大きさ」から、種類ごと・モードごとに変えられます。",
     ],
     ["キーボード", "Space＝一時停止／再開、f＝全画面の切替、m＝モードの切替。"],
   ];
@@ -175,6 +177,10 @@ export class OptionsPanel {
   private readonly manualSpeedSelect: HTMLSelectElement;
   /** [UR3-8] 動画モード(auto)の動きの速さ select（動画モードタブ。底上げ済み選択肢）。 */
   private readonly autoSpeedSelect: HTMLSelectElement;
+  /** [UR4-2] マウス操作モードの「大きさ」select（選択中 manualTypeId に bind し直す単一 select）。 */
+  private readonly manualSizeSelect: HTMLSelectElement;
+  /** [UR4-2] 動画モードの「大きさ」per-type select（種別 id と select のペア。mouse/foxtail/toys/insect）。 */
+  private readonly autoSizeSelects: Array<{ id: string; select: HTMLSelectElement }> = [];
   private readonly intervalInput: HTMLInputElement;
   private readonly intervalValue: HTMLSpanElement;
   private readonly playLimitSelect: HTMLSelectElement;
@@ -280,6 +286,33 @@ export class OptionsPanel {
       this.settings.setManualSpeedScale(Number(manualSpeedSelect.value));
     });
     manualSpeedRow.append(manualSpeedLabel, manualSpeedSelect);
+
+    // [UR4-2] マウス操作モードの「大きさ」（選択中の操作対象＝manualTypeSelect.value に bind する単一 select）。
+    // change → settings.setManualObjectScale(現在の操作対象, value)。現在対象の値への bind し直しは
+    // syncManualType が担う（種別切替と同じ場所で今の種別の manualObjectScales[typeId] を選び直す）。
+    const manualSizeRow = document.createElement("div");
+    manualSizeRow.className = "cd-options-row";
+    const manualSizeLabel = document.createElement("label");
+    manualSizeLabel.className = "cd-options-label";
+    manualSizeLabel.textContent = "大きさ";
+    manualSizeLabel.htmlFor = "cd-manual-size-select";
+    const manualSizeSelect = document.createElement("select");
+    manualSizeSelect.id = "cd-manual-size-select";
+    manualSizeSelect.className = "cd-options-select";
+    for (const opt of OBJECT_SCALE_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = String(opt.value);
+      option.textContent = opt.label;
+      manualSizeSelect.appendChild(option);
+    }
+    manualSizeSelect.addEventListener("change", () => {
+      // 現在操作中の種別（select の値）に対して設定する。custom もここに収まる（manual 専用のため）。
+      this.settings.setManualObjectScale(
+        this.manualTypeSelect.value,
+        Number(manualSizeSelect.value),
+      );
+    });
+    manualSizeRow.append(manualSizeLabel, manualSizeSelect);
 
     // 動画モード用: AUTO_SPEED_SCALE_OPTIONS（底上げ済み・標準=1.8）。change → settings.setAutoSpeedScale。
     const autoSpeedRow = document.createElement("div");
@@ -577,6 +610,34 @@ export class OptionsPanel {
       this.autoTypeChecks.push({ id: type.id, input: typeCheckbox });
     }
 
+    // [UR4-2] 動画モードの「大きさ」per-type select（mouse/foxtail/toys/insect）。上の「出現する種類」
+    // per-type 行と同じ生成パターンを流用する。change → settings.setAutoObjectScale(type.id, value)。
+    // custom（任意画像）は動画モードに出ないため対象外（autoTypes に含まれない）。
+    const autoSizeRows: HTMLDivElement[] = [];
+    for (const type of autoTypes) {
+      const sizeRow = document.createElement("div");
+      sizeRow.className = "cd-options-row";
+      const sizeLabel = document.createElement("label");
+      sizeLabel.className = "cd-options-label";
+      sizeLabel.textContent = type.name;
+      sizeLabel.htmlFor = `cd-auto-size-${type.id}`;
+      const sizeSelect = document.createElement("select");
+      sizeSelect.id = `cd-auto-size-${type.id}`;
+      sizeSelect.className = "cd-options-select";
+      for (const opt of OBJECT_SCALE_OPTIONS) {
+        const option = document.createElement("option");
+        option.value = String(opt.value);
+        option.textContent = opt.label;
+        sizeSelect.appendChild(option);
+      }
+      sizeSelect.addEventListener("change", () => {
+        this.settings.setAutoObjectScale(type.id, Number(sizeSelect.value));
+      });
+      sizeRow.append(sizeLabel, sizeSelect);
+      autoSizeRows.push(sizeRow);
+      this.autoSizeSelects.push({ id: type.id, select: sizeSelect });
+    }
+
     // =========================================================================
     // タブ組み立て（3 タブ＝共通/マウスモード/動画モード）。各セクションを対応パネルへ。
     // =========================================================================
@@ -610,13 +671,22 @@ export class OptionsPanel {
     // [UR3-5] 虫の動きパターン section。操作対象=虫のときだけ表示する（syncManualType が hidden を制御）。
     const insectPatternSection = createSection("動きパターン");
     insectPatternSection.appendChild(insectPatternRow);
+    // [UR4-2] マウス操作モードの「大きさ」（選択中の操作対象に bind する単一 select）。
+    const manualSizeSection = createSection("大きさ");
+    manualSizeSection.appendChild(manualSizeRow);
     // [UR3-8] マウス操作モードの動きの速さ（従来の選択肢を据置）。
     const manualMotionSection = createSection("動き");
     manualMotionSection.appendChild(manualSpeedRow);
     const manualPanel = this.createTabPanel(1);
     // [UR3-10] 任意画像の画像設定 section（critterSection）も操作対象=任意画像のときだけ表示するため、
     // 動きパターン section と同じくマウスモードタブに置く（表示切替は syncManualType が担う）。
-    manualPanel.append(manualSection, insectPatternSection, critterSection, manualMotionSection);
+    manualPanel.append(
+      manualSection,
+      insectPatternSection,
+      critterSection,
+      manualSizeSection,
+      manualMotionSection,
+    );
 
     // --- 動画モードタブ: 動き(速さ)・出現(プリセット/出現間隔)・出現する種類・遊びすぎ防止 ---
     // [UR3-8] 動画モードの動きの速さ（底上げ済み）。要望「動画モードが全体的に遅い」への主対応のため
@@ -626,7 +696,16 @@ export class OptionsPanel {
     const spawnSection = createSection("出現");
     spawnSection.append(presetRow, intervalRow);
     const autoPanel = this.createTabPanel(2);
-    autoPanel.append(autoMotionSection, spawnSection);
+    autoPanel.append(autoMotionSection);
+    // [UR4-2] 動画モードの「大きさ」per-type section（動き の直後・発見しやすい位置）。種別が渡された時だけ。
+    if (autoSizeRows.length > 0) {
+      const autoSizeSection = createSection("大きさ");
+      for (const row of autoSizeRows) {
+        autoSizeSection.appendChild(row);
+      }
+      autoPanel.appendChild(autoSizeSection);
+    }
+    autoPanel.appendChild(spawnSection);
     // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
     if (typeRows.length > 0) {
       const typesSection = createSection("出現する種類");
@@ -663,6 +742,7 @@ export class OptionsPanel {
     this.customImageSection = critterSection;
     this.manualSpeedSelect = manualSpeedSelect;
     this.autoSpeedSelect = autoSpeedSelect;
+    this.manualSizeSelect = manualSizeSelect;
     this.intervalInput = intervalInput;
     this.intervalValue = intervalValue;
     this.playLimitSelect = playLimitSelect;
@@ -882,10 +962,11 @@ export class OptionsPanel {
   /** 現在の設定値をコントロールへ反映する（起動時・外部変更・開いた時に呼ぶ）。 */
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
-    this.syncManualType(settings.manualTypeId);
+    this.syncManualType(settings.manualTypeId, settings.manualObjectScales);
     this.syncInsectPattern(settings.insectManualPattern);
     this.syncSpeed(this.manualSpeedSelect, SPEED_SCALE_OPTIONS, settings.manualSpeedScale);
     this.syncSpeed(this.autoSpeedSelect, AUTO_SPEED_SCALE_OPTIONS, settings.autoSpeedScale);
+    this.syncAutoSizes(settings.autoObjectScales);
     this.syncBackground(settings.background);
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
@@ -922,7 +1003,7 @@ export class OptionsPanel {
    * [UR-4] 操作するもの select を settings.manualTypeId から復元する。
    * タブでモード別に分けたため disabled 制御は撤廃（常時編集可）。配線・復元は維持する。
    */
-  private syncManualType(manualTypeId: string): void {
+  private syncManualType(manualTypeId: string, manualObjectScales: Record<string, number>): void {
     if (this.manualTypeSelect.value !== manualTypeId) {
       this.manualTypeSelect.value = manualTypeId;
     }
@@ -930,6 +1011,22 @@ export class OptionsPanel {
     this.insectPatternSection.hidden = manualTypeId !== INSECT_TYPE_ID;
     // [UR3-10] 任意画像の画像設定 UI は操作対象=任意画像のときだけ表示する（他種別選択で隠す）。
     this.customImageSection.hidden = manualTypeId !== CUSTOM_CRITTER_TYPE_ID;
+    // [UR4-2] 「大きさ」select を今の操作対象の倍率へ bind し直す（種別ごとに固有値を表示・最近傍で選ぶ）。
+    this.syncSpeed(
+      this.manualSizeSelect,
+      OBJECT_SCALE_OPTIONS,
+      manualObjectScales[manualTypeId] ?? DEFAULT_OBJECT_SCALE,
+    );
+  }
+
+  /**
+   * [UR4-2] 動画モードの per-type「大きさ」select を settings.autoObjectScales から復元する
+   * （外部変更にも追従）。プリセット外の永続値でも syncSpeed が最近傍を選ぶ。
+   */
+  private syncAutoSizes(autoObjectScales: Record<string, number>): void {
+    for (const { id, select } of this.autoSizeSelects) {
+      this.syncSpeed(select, OBJECT_SCALE_OPTIONS, autoObjectScales[id] ?? DEFAULT_OBJECT_SCALE);
+    }
   }
 
   /**
