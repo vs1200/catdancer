@@ -215,6 +215,19 @@ async function bootstrap(): Promise<void> {
   let currentMode: Mode | null = null;
   let currentModeName: AppMode = settings.settings.mode;
   let panelOpen = false;
+  // タブ非表示（背景タブ）を第 2 の一時停止要因として持つ。panelOpen とは独立し、どちらかが真なら
+  // 現行モードを一時停止する（合成pause）。背景タブで rAF は止まり描画は自然停止するが、Web Audio の
+  // 環境音ループ（走行音/羽音）は鳴り続けてしまうため、hidden 時に明示的に無音化する。
+  let tabHidden = false;
+
+  /**
+   * 現行モードの一時停止を「パネル開(panelOpen)」または「タブ非表示(tabHidden)」の論理和で統一する
+   * （合成pause）。各要因を個別に setPaused すると、片方の解除時にもう片方を上書き（誤再開）して
+   * しまうため、常に両要因の OR を反映する。currentMode 未確定時は no-op。
+   */
+  const applyPause = (): void => {
+    currentMode?.setPaused(panelOpen || tabHidden);
+  };
 
   const modeByName = (name: AppMode): Mode => (name === "auto" ? autoMode : manualMode);
 
@@ -246,8 +259,8 @@ async function bootstrap(): Promise<void> {
     // 解除は常に行いつつ、実際の再開は現行が auto の時だけにする（防御的ガード）。
     if (currentModeName === "auto") {
       autoMode.start();
-      // パネルが開いていれば一時停止を引き継ぐ。
-      autoMode.setPaused(panelOpen);
+      // パネル開/タブ非表示の一時停止を引き継ぐ（合成pause）。ここでは currentMode は autoMode。
+      applyPause();
     }
   }
 
@@ -261,8 +274,8 @@ async function bootstrap(): Promise<void> {
     playLimitTimer.reset();
     currentMode = modeByName(name);
     currentMode.start();
-    // 切替後もパネル開閉状態を引き継ぐ（開いていれば新モードも一時停止）。
-    currentMode.setPaused(panelOpen);
+    // 切替後もパネル開閉/タブ非表示を引き継ぐ（合成pause: どちらかが真なら新モードも一時停止）。
+    applyPause();
   };
 
   // 捕獲フィードバック（auto 専用）: canvas のタップ/クリックで、当たった動くオブジェクトを
@@ -349,13 +362,23 @@ async function bootstrap(): Promise<void> {
   optionsPanel.setOnOpenChange((open) => {
     panelOpen = open;
     optionsButton.setExpanded(open);
-    currentMode?.setPaused(open);
+    // panelOpen 更新後に合成pause を反映（タブ非表示中ならパネルを閉じても一時停止のまま）。
+    applyPause();
   });
   optionsPanel.mount(document.body);
   optionsButton.mount(document.body);
 
   // 復元した mode でモードを開始する。
   switchTo(settings.settings.mode);
+
+  // タブ非表示（背景タブ）で現行モードを一時停止し、環境音ループの背景再生（無駄鳴り）を止める。
+  // hidden→visible で合成pause を更新（パネルが開いている限りは復帰しない）。ハンドラは安定参照にして
+  // 将来の破棄フロー（removeEventListener）に備える。現状 bootstrap に破棄フローは無く、他リスナ同様 add のみ。
+  const onVisibilityChange = (): void => {
+    tabHidden = document.hidden;
+    applyPause();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   // 開発時のみ: critter 数/モード等を観測する DEV フックを露出する（本番ビルドでは tree-shake）。
   if (import.meta.env.DEV) {
@@ -437,6 +460,15 @@ async function bootstrap(): Promise<void> {
           return false;
         },
       },
+      // タブ非表示（背景タブ）一時停止の検証補助。実ブラウザで document.hidden を偽装するのは
+      // 難しいため、visibilitychange と同じ経路（tabHidden 更新 → applyPause）を叩く観測用フック。
+      // 例: __catScene.setTabHidden(true) で無音化 → false で復帰（合成pause のため panelOpen 中は復帰しない）。
+      setTabHidden: (v: boolean) => {
+        tabHidden = v;
+        applyPause();
+      },
+      // 現在の tabHidden 値（合成pause の観測用）。
+      tabHidden: () => tabHidden,
     };
     // 設定 API（オプション画面が呼ぶ形）を検証用に露出する。
     // 例: __catSettings.setMode('auto') / setAutoSpawnInterval(800)
