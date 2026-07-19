@@ -176,6 +176,131 @@ export function approach(current: number, target: number, smoothTime: number, dt
   return current + (target - current) * a;
 }
 
+// --- [UR3-2/3] 根元(base/hand)の「周長に沿う連続移動」モデル -------------------------------
+//
+// base を head から距離 L 固定で導出する旧モデル（穂を振ると根元も同量動く／端反転で根元が半径 L で
+// 高速掃引＝テレポート）をやめ、base を「viewport の周長(perimeter)を 1D ループとして辿る独立した
+// 遅い点」にする。周長を弧長 s∈[0,P)（P=2(W+H)）でパラメトライズし、ポインタを最寄り周上点へ投影した
+// 弧長を target に、現在弧長を **短い方の弧方向**（wrap 対応）へ **ゆっくり** 積分する。これにより
+// (UR3-2) head と base の距離が可変になり穂先が base 周りに弧を描く／(UR3-3) 直行(対角)では周長を
+// 突っ切れないので根元が瞬間移動しない、を同時に満たす。純ロジック＝Vitest 可能・UR3-7 で再利用。
+//
+// 弧長の割付（時計回り, +y=画面下）:
+//   top   : (0,0)→(W,0)     s∈[0, W)
+//   right : (W,0)→(W,H)     s∈[W, W+H)
+//   bottom: (W,H)→(0,H)     s∈[W+H, 2W+H)
+//   left  : (0,H)→(0,0)     s∈[2W+H, 2W+2H)=[.., P)
+
+/** viewport の周長 P = 2(W+H)。弧長パラメトライズの周期。 */
+export function perimeterLength(vp: Viewport): number {
+  return 2 * (vp.width + vp.height);
+}
+
+/** 弧長 s を [0, perimeter) へ正規化する（負値・周回を wrap）。perimeter<=0 は 0。 */
+export function wrapArc(s: number, perimeter: number): number {
+  if (!(perimeter > 0) || !Number.isFinite(s)) {
+    return 0;
+  }
+  const m = s % perimeter;
+  return m < 0 ? m + perimeter : m;
+}
+
+/** 弧長差 to-from を周長ループの最短経路 [-P/2, P/2] へ正規化する（shortestAngleDelta の弧長版）。 */
+export function shortestArcDelta(from: number, to: number, perimeter: number): number {
+  if (!(perimeter > 0)) {
+    return 0;
+  }
+  const half = perimeter / 2;
+  let d = (to - from) % perimeter;
+  if (d > half) {
+    d -= perimeter;
+  } else if (d < -half) {
+    d += perimeter;
+  }
+  return d;
+}
+
+/** 弧長 s に対応する周上の 2D 点。s は自動で wrap。常に viewport 境界上（内部を突っ切らない不変条件）。 */
+export function perimeterPoint(vp: Viewport, s: number): Vec2 {
+  const { width: W, height: H } = vp;
+  const u = wrapArc(s, perimeterLength(vp));
+  if (u < W) {
+    return { x: u, y: 0 }; // top
+  }
+  if (u < W + H) {
+    return { x: W, y: u - W }; // right
+  }
+  if (u < 2 * W + H) {
+    return { x: W - (u - (W + H)), y: H }; // bottom
+  }
+  return { x: 0, y: H - (u - (2 * W + H)) }; // left
+}
+
+/** 弧長 s が属する辺（外向き法線＝retract のスライド方向に使う）。 */
+export function perimeterEdge(vp: Viewport, s: number): FoxtailEdge {
+  const { width: W, height: H } = vp;
+  const u = wrapArc(s, perimeterLength(vp));
+  if (u < W) {
+    return "top";
+  }
+  if (u < W + H) {
+    return "right";
+  }
+  if (u < 2 * W + H) {
+    return "bottom";
+  }
+  return "left";
+}
+
+/**
+ * 点 (px,py) を最寄りの周上点へ投影した弧長を返す純関数。各辺へ垂線の足（線分へクランプ）を下ろし、
+ * 最短距離の辺の弧長を採用する。内部点は最寄り辺、外部/隅ではクランプで隅へ寄る。base の target 弧長。
+ */
+export function projectToPerimeter(px: number, py: number, vp: Viewport): number {
+  const { width: W, height: H } = vp;
+  const cx = Math.min(Math.max(px, 0), W);
+  const cy = Math.min(Math.max(py, 0), H);
+  const cands: readonly { d: number; s: number }[] = [
+    { d: Math.hypot(px - cx, py), s: cx }, // top: 足(cx,0)
+    { d: Math.hypot(px - W, py - cy), s: W + cy }, // right: 足(W,cy)
+    { d: Math.hypot(px - cx, py - H), s: W + H + (W - cx) }, // bottom: 足(cx,H)
+    { d: Math.hypot(px, py - cy), s: 2 * W + H + (H - cy) }, // left: 足(0,cy)
+  ];
+  let best = cands[0];
+  for (const c of cands) {
+    if (c.d < best.d) {
+      best = c;
+    }
+  }
+  return wrapArc(best.s, perimeterLength(vp));
+}
+
+/**
+ * 現在弧長 current を target 弧長へ **最短の弧方向**（wrap 対応）で指数平滑（フレームレート非依存）。
+ * smoothTime を head のバネ時定数より十分大きく取ることで、base が「かなり遅い」独立点になる。速い/
+ * 直行のポインタ移動では base はほとんど動かず、周長を辿る移動でのみ base が周上を旅する。
+ */
+export function approachArc(
+  current: number,
+  target: number,
+  smoothTime: number,
+  dt: number,
+  perimeter: number,
+): number {
+  if (!(perimeter > 0)) {
+    return current;
+  }
+  const c = wrapArc(current, perimeter);
+  if (!(dt > 0)) {
+    return c;
+  }
+  const t = wrapArc(target, perimeter);
+  const delta = shortestArcDelta(c, t, perimeter);
+  const tau = Math.max(1e-4, smoothTime);
+  const a = 1 - Math.exp(-dt / tau);
+  return wrapArc(c + delta * a, perimeter);
+}
+
 /**
  * バネ・ダンパで pos を target へ寄せる（in-place, semi-implicit Euler）。
  * stiffness=k(=ω²), damping=c。減衰比 ζ = c / (2√k)。ζ<1（不足減衰）で追従に僅かな

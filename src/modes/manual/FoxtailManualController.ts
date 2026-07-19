@@ -6,14 +6,15 @@ import type { Vec2 } from "../../core/vec2";
 import {
   approach,
   approachAngle,
-  computeBasePosition,
-  computeHeadRender,
+  approachArc,
   computeRetract,
   distanceToNearestEdge,
   edgeOutwardAngle,
-  type FoxtailEdge,
   foxtailLength,
-  nearestEdge,
+  perimeterEdge,
+  perimeterLength,
+  perimeterPoint,
+  projectToPerimeter,
   springStep,
 } from "./foxtailGeometry";
 import type { ManualController, ManualControllerSnapshot } from "./ManualController";
@@ -58,12 +59,19 @@ const RETRACT_THRESHOLD_PX = 96;
  */
 const RETRACT_SHIFT_PX = 240;
 
-/** 端方向(基部の向き)を追う指数平滑の時定数(秒)。端切替の 90 度スナップを消す。 */
+/** 端方向(基部の retract スライド向き)を追う指数平滑の時定数(秒)。隅越えの 90 度スナップを消す。 */
 const OUTWARD_SMOOTH_TIME = 0.16;
 /** retract 値を追う指数平滑の時定数(秒)。境界の滑らかさ（しまう/出るの遷移）。 */
 const RETRACT_SMOOTH_TIME = 0.1;
-/** 端切替のヒステリシス(px)。別の端がこれ以上近いときだけ乗り換える。 */
-const EDGE_HYSTERESIS_PX = 80;
+
+/**
+ * [UR3-2/3] 根元(base/hand)の周長追従の時定数(秒)。head のバネ(≈0.05s級)より一桁遅くし、根元が
+ * 「かなり遅い独立点」になるようにする。大きいほど直行(対角)ポインタで根元が動かず(UR3-3a)穂だけ弧を
+ * 描く(UR3-2)が、周回移動で根元が上へ到達するのが緩慢になる(UR3-3b)。0.8〜1.5s で feel 調整。
+ */
+const BASE_SMOOTH_TIME = 1.1;
+/** aim(=head−base)が退化(≒0)したときの atan2 ジッタ回避しきい値(px)。これ未満は前フレーム heading 維持。 */
+const AIM_MIN_PX = 1;
 
 /** 穂の二次揺れ(生気)。回転へ載せる微小 sway の振幅(rad)と角周波数(rad/s)。過度でなく生きた感じ。 */
 const SWAY_AMP_RAD = 0.05;
@@ -83,10 +91,12 @@ const SPEED_SCALE_MAX = 3;
  * 人が画面端から大きな猫じゃらし(foxtail-hand.webp・横向き)を差し込んで振る挙動を、1 枚の Sprite を
  * 基部pivot(左端≈0.02)まわりに毎フレーム配置/回転して表現する:
  *  - 穂(head) はマウスへバネ的ラグで追従（{@link springStep}）＝速い振りで遅れて振れる「ふりふり」。
- *  - 基部(hand) は最寄り端(ヒステリシス選択・角度平滑)の外向きへ head から L 離れた点に置き、穂が
- *    中央寄りを向く。飛び出す端/位置はマウス位置で可変。
+ *  - [UR3-2/3] 基部(base/hand) は **viewport 周長を辿る独立した遅い点**。ポインタを最寄り周上点へ
+ *    投影した弧長を target に、現在弧長を短い弧方向へ長い時定数({@link BASE_SMOOTH_TIME})で積分する
+ *    ({@link approachArc})。直行(対角)では周長を突っ切れず根元が瞬間移動しない／周回でのみ根元が旅する。
+ *  - 回転は base→head 方向(atan2)。穂先 tip は base から固定長 L の点＝穂先が base 周りに弧を描く。
  *  - マウスが端に近いほど retract 0→1 で rig を端の外へスライドして隠す（しまえる）。
- *  - 穂に微小 sway を足して静止時も生きた感じにする。speedScale はバネの反応速度に効く。
+ *  - 穂に微小 sway を足して静止時も生きた感じにする。speedScale は head バネの反応速度に効く（base は不変）。
  *
  * 音声/尻尾は無し（foxtail は元々無音）。onPointerDown は no-op。Sprite/リソースは stop で確実に破棄し、
  * 種別切替でのリークを防ぐ（共有テクスチャは破棄しない）。動画(auto)モードの foxtail.webp には非干渉。
@@ -102,8 +112,9 @@ export class FoxtailManualController implements ManualController {
   private readonly head: Vec2 = { x: 0, y: 0 };
   private readonly headVel: Vec2 = { x: 0, y: 0 };
   private lastPointer: Vec2 = { x: 0, y: 0 };
-  private currentEdge: FoxtailEdge | null = null;
-  private outwardAngle = Math.PI; // 既定は左端外向き(左から差し込む)
+  // [UR3-2/3] 根元の周長上の現在位置（弧長 s∈[0,P)）。target=ポインタ投影弧長へ遅く積分する独立点。
+  private baseArc = 0;
+  private outwardAngle = Math.PI; // retract スライドの外向き角。既定は左端外向き(左から差し込む)
   private retract = 0;
   private time = 0;
   // 観測用（debugSnapshot）。
@@ -132,8 +143,9 @@ export class FoxtailManualController implements ManualController {
     this.headVel.x = 0;
     this.headVel.y = 0;
     this.lastPointer = { ...center };
-    this.currentEdge = nearestEdge(center.x, center.y, vp, null, EDGE_HYSTERESIS_PX);
-    this.outwardAngle = edgeOutwardAngle(this.currentEdge);
+    // 根元は中央を最寄り周上点へ投影した弧長から開始（起動時に根元が最寄り端に居るように）。
+    this.baseArc = projectToPerimeter(center.x, center.y, vp);
+    this.outwardAngle = edgeOutwardAngle(perimeterEdge(vp, this.baseArc));
     this.retract = 0;
     this.time = 0;
 
@@ -194,17 +206,10 @@ export class FoxtailManualController implements ManualController {
     const vp = this.deps.scene.worldBounds.viewport;
     const pointer = this.deps.pointer.pointer.value;
 
-    // 追従目標と retract 目標・最寄り端を決める。
+    // 追従目標と retract 目標を決める。
     let retractTarget: number;
     if (pointer) {
       this.lastPointer = { x: pointer.x, y: pointer.y };
-      this.currentEdge = nearestEdge(
-        pointer.x,
-        pointer.y,
-        vp,
-        this.currentEdge,
-        EDGE_HYSTERESIS_PX,
-      );
       const dist = distanceToNearestEdge(pointer.x, pointer.y, vp);
       retractTarget = computeRetract(dist, RETRACT_THRESHOLD_PX);
     } else {
@@ -224,11 +229,16 @@ export class FoxtailManualController implements ManualController {
       remaining -= h;
     }
 
-    // 2) 基部の向き(端外向き角)と retract を滑らかに追う（端切替スナップ/境界のガタつきを消す）。
-    const edge = this.currentEdge ?? "left";
+    // 2) [UR3-2/3] 根元(base)を周長に沿って target 弧長へ遅く積分（短い弧方向・内部を突っ切らない）。
+    //    target = ポインタを最寄り周上点へ投影した弧長。速い/直行の動きでは base はほとんど動かない。
+    const targetArc = projectToPerimeter(target.x, target.y, vp);
+    this.baseArc = approachArc(this.baseArc, targetArc, BASE_SMOOTH_TIME, dt, perimeterLength(vp));
+
+    // 3) retract のスライド向き(base の属する辺の外向き角)と retract 値を滑らかに追う（隅越えの
+    //    90 度スナップ/境界のガタつきを消す）。base は周長を連続移動するので辺の切替は緩慢。
     this.outwardAngle = approachAngle(
       this.outwardAngle,
-      edgeOutwardAngle(edge),
+      edgeOutwardAngle(perimeterEdge(vp, this.baseArc)),
       OUTWARD_SMOOTH_TIME,
       dt,
     );
@@ -243,14 +253,25 @@ export class FoxtailManualController implements ManualController {
       return;
     }
     const length = foxtailLength(vp, FOXTAIL_LENGTH_FRAC);
-    const outward: Vec2 = { x: Math.cos(this.outwardAngle), y: Math.sin(this.outwardAngle) };
     const retractShift = this.retract * RETRACT_SHIFT_PX;
 
-    // 基部(配置点)= head + outward·(L + retractShift)。穂は基部から内側(=中央寄り)を向く。
-    this.base = computeBasePosition(this.head, outward, length, retractShift);
-    this.headRender = computeHeadRender(this.head, outward, retractShift);
-    // 回転: 基部→穂 の向き = 外向きの逆(inward)。straight 素材なので atan2(-outward)＝outwardAngle+π。
-    this.heading = this.outwardAngle + Math.PI;
+    // [UR3-2/3] 基部(配置点)= 周長上の現在点 + 外向き·retractShift。周長を辿る独立した遅い点なので、
+    // 穂を振っても根元は動かず(UR3-2)、端反転でも高速掃引しない(UR3-3)。
+    const p = perimeterPoint(vp, this.baseArc);
+    const outward: Vec2 = { x: Math.cos(this.outwardAngle), y: Math.sin(this.outwardAngle) };
+    this.base = { x: p.x + outward.x * retractShift, y: p.y + outward.y * retractShift };
+
+    // 回転: 基部→穂 の向き = atan2(head−base)。head のバネラグで aim がオーバーシュートし穂が振れる。
+    const aimX = this.head.x - this.base.x;
+    const aimY = this.head.y - this.base.y;
+    if (Math.hypot(aimX, aimY) >= AIM_MIN_PX) {
+      this.heading = Math.atan2(aimY, aimX);
+    } // 退化時は前フレーム heading を維持（atan2 ジッタ回避）。
+    // 穂先(tip)= base から固定長 L の点。head の向きへ aim するので tip が base 周りに半径 L の弧を描く。
+    this.headRender = {
+      x: this.base.x + Math.cos(this.heading) * length,
+      y: this.base.y + Math.sin(this.heading) * length,
+    };
     // 微小 sway を足して静止時も生きた感じに（過度でなく）。
     const sway = SWAY_AMP_RAD * Math.sin(this.time * SWAY_FREQ);
 
