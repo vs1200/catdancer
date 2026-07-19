@@ -70,6 +70,48 @@ function createSection(title: string): HTMLElement {
   return section;
 }
 
+/**
+ * 共通タブ末尾に置く「操作方法」ヘルプ（純テキスト。リンク/操作なし）。
+ * 初見の飼い主に、UI 上どこにも出ていないタップ捕獲・モード差・操作対象選択・キーボード
+ * ショートカットを発見可能にする。用語→説明の対で dl/dt/dd に組み、既存の配色トークン
+ * （見出し #e8e9ee・本文 #cfd2da）へ合わせて派手なスタイルを足さない。事実は README と
+ * keyToShortcutAction（Space=一時停止/再開・f=全画面・m=モード切替）に忠実。
+ */
+function createHelpSection(): HTMLElement {
+  const section = createSection("操作方法");
+  const list = document.createElement("dl");
+  list.className = "cd-options-help";
+  const items: ReadonlyArray<readonly [string, string]> = [
+    [
+      "タップ / クリック",
+      "猫用動画モードで、動いているオブジェクトをタップ（クリック）すると捕まえられます（逃げて音が鳴ります）。",
+    ],
+    [
+      "モード",
+      "「マウス操作モード」は選んだオブジェクトがカーソル（タッチ）に反応し、「猫用動画モード」は自動でオブジェクトが動き回ります。切替は「共通」タブのモード設定から。",
+    ],
+    [
+      "操作するもの",
+      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫）を選べます。",
+    ],
+    ["キーボード", "Space＝一時停止／再開、f＝全画面の切替、m＝モードの切替。"],
+  ];
+  for (const [term, desc] of items) {
+    const item = document.createElement("div");
+    item.className = "cd-options-help-item";
+    const termEl = document.createElement("dt");
+    termEl.className = "cd-options-help-term";
+    termEl.textContent = term;
+    const descEl = document.createElement("dd");
+    descEl.className = "cd-options-help-desc";
+    descEl.textContent = desc;
+    item.append(termEl, descEl);
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+  return section;
+}
+
 /** auto モードでトグルできる種別（id と表示名）。「出現する種類」チェックボックスに使う。 */
 export interface AutoTypeOption {
   id: string;
@@ -481,9 +523,18 @@ export class OptionsPanel {
     bgSection.append(colorRow, imageRow, resetRow);
     const critterSection = createSection("オブジェクト");
     critterSection.append(critterImageRow, critterResetRow);
+    // 初見の飼い主向けの操作導線（純テキスト）。共通タブ末尾に置く。
+    const helpSection = createHelpSection();
 
     const commonPanel = this.createTabPanel(0);
-    commonPanel.append(behaviorSection, displaySection, volSection, bgSection, critterSection);
+    commonPanel.append(
+      behaviorSection,
+      displaySection,
+      volSection,
+      bgSection,
+      critterSection,
+      helpSection,
+    );
 
     // --- マウスモードタブ: 操作するもの ---
     const manualSection = createSection("操作対象");

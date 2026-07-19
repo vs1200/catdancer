@@ -272,6 +272,27 @@ const CSS = `
   padding: 7px 8px;
 }
 
+/* 「操作方法」ヘルプ（純テキスト・用語→説明）。既存の配色/余白トークンに合わせる。 */
+.cd-options-help {
+  margin: 0;
+}
+.cd-options-help-item {
+  margin-bottom: 10px;
+}
+.cd-options-help-item:last-child {
+  margin-bottom: 0;
+}
+.cd-options-help-term {
+  margin: 0 0 2px;
+  font-weight: 600;
+  color: #e8e9ee;
+}
+.cd-options-help-desc {
+  /* dd の既定インデント（margin-inline-start）を打ち消す。行間は panel 既定(1.5)に委ねる。 */
+  margin: 0;
+  color: #cfd2da;
+}
+
 /* file input は視覚的に隠すが DOM 上には残す（自動化アップロード対象になれるように）。 */
 .cd-visually-hidden {
   position: absolute;
