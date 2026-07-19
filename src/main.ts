@@ -368,7 +368,7 @@ async function bootstrap(): Promise<void> {
   //   world 座標は UR-6 の虫クリック出現の受け皿。
   // - auto: 当たった動くオブジェクトを素早く逃がし（画面外へ→despawn）反応SEを鳴らす。空きスペースは無反応。
   app.canvas.addEventListener("pointerdown", (event) => {
-    if (panelOpen || autoStoppedByTimer) {
+    if (panelOpen || autoStoppedByTimer || keyPaused) {
       return;
     }
     if (currentModeName === "manual") {
@@ -673,6 +673,7 @@ async function bootstrap(): Promise<void> {
       currentModeName === "auto" &&
       !panelOpen &&
       !tabHidden &&
+      !keyPaused &&
       !autoStoppedByTimer &&
       playLimitTimer.tick(dt)
     ) {
