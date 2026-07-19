@@ -57,3 +57,30 @@ describe("SettingsStore.applySpawnPreset", () => {
     expect(store.settings.autoDisabledTypes).toEqual([...calm.disabledTypes]);
   });
 });
+
+describe("SettingsStore.setHideCursor", () => {
+  it("既定は false（オプトイン）", () => {
+    const store = new SettingsStore("test:setHideCursor:default");
+    expect(store.settings.hideCursor).toBe(false);
+  });
+
+  it("snapshot に反映し、購読者へ通知する", () => {
+    const store = new SettingsStore("test:setHideCursor:reflect");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.setHideCursor(true);
+    expect(store.settings.hideCursor).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ hideCursor: true }));
+    // 解除でも反映される。
+    store.setHideCursor(false);
+    expect(store.settings.hideCursor).toBe(false);
+  });
+
+  it("非boolは normalizeHideCursor で false に正規化する（true 以外は false）", () => {
+    const store = new SettingsStore("test:setHideCursor:normalize");
+    // @ts-expect-error 敵対的入力（非boolでも壊れず false へ正規化されることを検証）。
+    store.setHideCursor("yes");
+    expect(store.settings.hideCursor).toBe(false);
+  });
+});

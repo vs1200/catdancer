@@ -223,6 +223,8 @@ async function bootstrap(): Promise<void> {
   // 現行モードを一時停止する（合成pause）。背景タブで rAF は止まり描画は自然停止するが、Web Audio の
   // 環境音ループ（走行音/羽音）は鳴り続けてしまうため、hidden 時に明示的に無音化する。
   let tabHidden = false;
+  // マウスカーソル非表示設定の現在値（起動時に settings から復元。subscribe 差分で更新される）。
+  let hideCursor = settings.settings.hideCursor;
 
   /**
    * 現行モードの一時停止を「パネル開(panelOpen)」または「タブ非表示(tabHidden)」の論理和で統一する
@@ -231,6 +233,17 @@ async function bootstrap(): Promise<void> {
    */
   const applyPause = (): void => {
     currentMode?.setPaused(panelOpen || tabHidden);
+  };
+
+  /**
+   * プレイ領域（#app=mount）のマウスカーソル表示を hideCursor 設定とパネル開閉から決める。
+   * hideCursor=ON かつ パネル閉のときだけ cursor:none にして、猫が物理カーソル（矢印）を追う
+   * 誤作動を防ぐ。パネルを開いている間は常に通常表示（人間が設定を操作できるように）。
+   * 歯車ボタンは #app の兄弟要素で自前の cursor:pointer を持つため、この none は波及しない
+   * （＝歯車付近は通常表示）。位置取得やイベント配線には触れず、見た目のみ制御する。
+   */
+  const applyCursorVisibility = (): void => {
+    mount.style.cursor = hideCursor && !panelOpen ? "none" : "";
   };
 
   const modeByName = (name: AppMode): Mode => (name === "auto" ? autoMode : manualMode);
@@ -303,6 +316,7 @@ async function bootstrap(): Promise<void> {
   let prevPlayLimit = settings.settings.autoPlayLimitMinutes;
   let prevCustomCritterId = settings.settings.customCritterImageId;
   let prevMuted = settings.settings.muted;
+  let prevHideCursor = settings.settings.hideCursor;
   let prevSpeedScale = settings.settings.speedScale;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join("\u0000");
@@ -311,6 +325,12 @@ async function bootstrap(): Promise<void> {
     if (next.muted !== prevMuted) {
       prevMuted = next.muted;
       audio.setMuted(next.muted);
+    }
+    if (next.hideCursor !== prevHideCursor) {
+      prevHideCursor = next.hideCursor;
+      hideCursor = next.hideCursor;
+      // パネル開閉状態は applyCursorVisibility 内で加味する（パネル開なら常に通常表示）。
+      applyCursorVisibility();
     }
     void backgroundController.apply(next);
     if (next.autoSpawnIntervalMs !== prevInterval) {
@@ -357,6 +377,8 @@ async function bootstrap(): Promise<void> {
   audio.setMasterVolume(settings.settings.masterVolume);
   // ミュート状態も明示反映（options 経由で初期化済みでも冪等）。映像のみモードの reload 復元。
   audio.setMuted(settings.settings.muted);
+  // マウスカーソル非表示設定の起動時復元（既定 false＝通常表示。ON なら #app 上で cursor:none）。
+  applyCursorVisibility();
   // 起動時復元: カスタム画像クリッター（あれば IDB からロードして AutoMode に追加）。
   if (settings.settings.customCritterImageId) {
     await loadCustomCritter(settings.settings.customCritterImageId);
@@ -375,6 +397,8 @@ async function bootstrap(): Promise<void> {
     optionsButton.setExpanded(open);
     // panelOpen 更新後に合成pause を反映（タブ非表示中ならパネルを閉じても一時停止のまま）。
     applyPause();
+    // パネル表示中はカーソルを通常表示に戻し、閉じたら hideCursor 設定に従って再び隠す。
+    applyCursorVisibility();
   });
   optionsPanel.mount(document.body);
   optionsButton.mount(document.body);

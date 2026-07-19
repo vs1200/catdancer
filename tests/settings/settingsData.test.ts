@@ -7,6 +7,7 @@ import {
   DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   DEFAULT_BACKGROUND_COLOR,
+  DEFAULT_HIDE_CURSOR,
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
   DEFAULT_MUTED,
@@ -18,6 +19,7 @@ import {
   MIN_SPEED_SCALE,
   normalizeAutoDisabledTypes,
   normalizeHexColor,
+  normalizeHideCursor,
   normalizeMode,
   normalizeMuted,
   normalizeSettings,
@@ -101,6 +103,22 @@ describe("normalizeMuted", () => {
     expect(normalizeMuted(1)).toBe(false);
     expect(normalizeMuted("true")).toBe(false);
     expect(normalizeMuted({})).toBe(false);
+  });
+});
+
+describe("normalizeHideCursor", () => {
+  it("真の boolean true のみ true", () => {
+    expect(normalizeHideCursor(true)).toBe(true);
+  });
+
+  it("false/欠損/型不一致は false（後方互換でカーソル表示）", () => {
+    expect(normalizeHideCursor(false)).toBe(false);
+    expect(normalizeHideCursor(undefined)).toBe(false);
+    expect(normalizeHideCursor(null)).toBe(false);
+    expect(normalizeHideCursor(0)).toBe(false);
+    expect(normalizeHideCursor(1)).toBe(false);
+    expect(normalizeHideCursor("true")).toBe(false);
+    expect(normalizeHideCursor({})).toBe(false);
   });
 });
 
@@ -235,6 +253,7 @@ describe("createDefaultSettings", () => {
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
       masterVolume: DEFAULT_MASTER_VOLUME,
       muted: DEFAULT_MUTED,
+      hideCursor: DEFAULT_HIDE_CURSOR,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -244,6 +263,7 @@ describe("createDefaultSettings", () => {
     });
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
     expect(DEFAULT_MUTED).toBe(false);
+    expect(DEFAULT_HIDE_CURSOR).toBe(false);
     expect(DEFAULT_MASTER_VOLUME).toBe(0.5);
     expect(DEFAULT_MODE).toBe("manual");
     expect(DEFAULT_AUTO_SPAWN_INTERVAL_MS).toBe(1500);
@@ -271,6 +291,7 @@ describe("normalizeSettings", () => {
         background: { type: "image", color: "#123", imageId: "bg-1" },
         masterVolume: 0.8,
         muted: true,
+        hideCursor: true,
         mode: "auto",
         autoSpawnIntervalMs: 900,
         autoPlayLimitMinutes: 15,
@@ -282,6 +303,7 @@ describe("normalizeSettings", () => {
       background: { type: "image", color: "#112233", imageId: "bg-1" },
       masterVolume: 0.8,
       muted: true,
+      hideCursor: true,
       mode: "auto",
       autoSpawnIntervalMs: 900,
       autoPlayLimitMinutes: 15,
@@ -344,6 +366,18 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ muted: "true" }).muted).toBe(false);
     expect(normalizeSettings({ muted: 1 }).muted).toBe(false);
     expect(normalizeSettings({ muted: null }).muted).toBe(false);
+  });
+
+  it("hideCursor は true のみ true、欠損/非boolは false（後方互換でカーソル表示）", () => {
+    // 欠損はデフォルト false（フィールドを持たない旧 localStorage との後方互換）。
+    expect(normalizeSettings({}).hideCursor).toBe(false);
+    // 真の true のみ受理。
+    expect(normalizeSettings({ hideCursor: true }).hideCursor).toBe(true);
+    // false/型不一致は false。
+    expect(normalizeSettings({ hideCursor: false }).hideCursor).toBe(false);
+    expect(normalizeSettings({ hideCursor: "true" }).hideCursor).toBe(false);
+    expect(normalizeSettings({ hideCursor: 1 }).hideCursor).toBe(false);
+    expect(normalizeSettings({ hideCursor: null }).hideCursor).toBe(false);
   });
 
   it("autoDisabledTypes は配列の文字列のみ・重複除去、非配列/欠損は []", () => {
@@ -419,6 +453,7 @@ describe("serializeSettings / parseSettings", () => {
       background: { type: "image" as const, color: "#abcdef", imageId: "bg-xyz" },
       masterVolume: 0.33,
       muted: true,
+      hideCursor: true,
       mode: "auto" as const,
       autoSpawnIntervalMs: 2400,
       autoPlayLimitMinutes: 10,
@@ -439,6 +474,7 @@ describe("serializeSettings / parseSettings", () => {
       "autoSpawnIntervalMs",
       "background",
       "customCritterImageId",
+      "hideCursor",
       "masterVolume",
       "mode",
       "muted",
@@ -462,6 +498,7 @@ describe("serializeSettings / parseSettings", () => {
       background: { type: "color", color: DEFAULT_BACKGROUND_COLOR, imageId: null },
       masterVolume: 0.2,
       muted: DEFAULT_MUTED,
+      hideCursor: DEFAULT_HIDE_CURSOR,
       mode: DEFAULT_MODE,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -482,5 +519,18 @@ describe("serializeSettings / parseSettings", () => {
     expect(parseSettings(serializeSettings(off)).muted).toBe(false);
     // muted フィールドを持たない旧 localStorage JSON は false へフォールバック。
     expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').muted).toBe(false);
+  });
+
+  it("hideCursor 往復: true/false ともに保持し、フィールド無しの旧 JSON は false（後方互換）", () => {
+    // true → serialize → parse で保持。
+    const on = createDefaultSettings();
+    on.hideCursor = true;
+    expect(parseSettings(serializeSettings(on)).hideCursor).toBe(true);
+    // false も保持。
+    const off = createDefaultSettings();
+    off.hideCursor = false;
+    expect(parseSettings(serializeSettings(off)).hideCursor).toBe(false);
+    // hideCursor フィールドを持たない旧 localStorage JSON は false へフォールバック。
+    expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').hideCursor).toBe(false);
   });
 });

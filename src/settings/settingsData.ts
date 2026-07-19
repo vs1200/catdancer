@@ -31,6 +31,12 @@ export interface AppSettings {
    * （解除で元の音量に戻る）。夜間や音に驚く猫向けに映像だけで遊ばせる用途。
    */
   muted: boolean;
+  /**
+   * マウスカーソル非表示モード。既定 false（オプトイン）。true の間はプレイ領域（#app）で
+   * カーソルを隠す（猫が物理マウスカーソルを追う誤作動を防ぐ）。歯車ボタン付近・設定パネル
+   * 表示中は人間が操作できるよう通常表示のまま（表示制御は main.ts が担い、位置取得は不変）。
+   */
+  hideCursor: boolean;
   /** 表示モード（manual=マウス操作 / auto=猫用動画）。 */
   mode: AppMode;
   /** auto モードのオブジェクト出現間隔(ms)。 */
@@ -64,6 +70,8 @@ export const DEFAULT_BACKGROUND_COLOR = "#ffffff";
 export const DEFAULT_MASTER_VOLUME = 0.5;
 /** 既定のミュート状態（映像のみモード）。既定 false（音あり）。 */
 export const DEFAULT_MUTED = false;
+/** 既定のマウスカーソル非表示状態。既定 false（オプトイン＝初回はカーソル表示）。 */
+export const DEFAULT_HIDE_CURSOR = false;
 /** 既定の表示モード。 */
 export const DEFAULT_MODE: AppMode = "manual";
 /** auto モードの既定出現間隔(ms)。 */
@@ -148,6 +156,14 @@ export function normalizeMuted(value: unknown): boolean {
 }
 
 /**
+ * マウスカーソル非表示設定を正規化する。真の boolean true のみ true、それ以外は false。
+ * （フィールドを持たない旧 localStorage との後方互換で欠損は false＝カーソル表示。）
+ */
+export function normalizeHideCursor(value: unknown): boolean {
+  return value === true;
+}
+
+/**
  * auto 無効化種別リストを正規化する。配列の文字列要素のみ採用し、重複を除去する。
  * 非配列/欠損は [] を返す（全種別有効）。
  */
@@ -214,6 +230,7 @@ export function createDefaultSettings(): AppSettings {
     },
     masterVolume: DEFAULT_MASTER_VOLUME,
     muted: DEFAULT_MUTED,
+    hideCursor: DEFAULT_HIDE_CURSOR,
     mode: DEFAULT_MODE,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
     autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -232,6 +249,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   }),
   masterVolume: DEFAULT_MASTER_VOLUME,
   muted: DEFAULT_MUTED,
+  hideCursor: DEFAULT_HIDE_CURSOR,
   mode: DEFAULT_MODE,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
@@ -265,6 +283,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     background: { type, color, imageId },
     masterVolume: clampVolume(obj.masterVolume),
     muted: normalizeMuted(obj.muted),
+    hideCursor: normalizeHideCursor(obj.hideCursor),
     mode: normalizeMode(obj.mode),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
     autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
@@ -284,6 +303,7 @@ export function serializeSettings(settings: AppSettings): string {
     },
     masterVolume: settings.masterVolume,
     muted: settings.muted,
+    hideCursor: settings.hideCursor,
     mode: settings.mode,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
     autoPlayLimitMinutes: settings.autoPlayLimitMinutes,

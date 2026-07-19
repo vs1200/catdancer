@@ -11,6 +11,7 @@ import {
   clampVolume,
   normalizeAutoDisabledTypes,
   normalizeHexColor,
+  normalizeHideCursor,
   normalizeMode,
   normalizeMuted,
   normalizeSpeedScale,
@@ -54,6 +55,7 @@ export class SettingsStore {
       background: { ...this.state.background },
       masterVolume: this.state.masterVolume,
       muted: this.state.muted,
+      hideCursor: this.state.hideCursor,
       mode: this.state.mode,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
       autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
@@ -166,6 +168,15 @@ export class SettingsStore {
    */
   setMuted(muted: boolean): void {
     this.state.muted = normalizeMuted(muted);
+    this.commit();
+  }
+
+  /**
+   * マウスカーソル非表示モードを設定する（永続化＋通知）。既定 false（オプトイン）。
+   * 実際のカーソル表示制御は main.ts の購読が担う（歯車付近・パネル表示中は通常表示）。
+   */
+  setHideCursor(hideCursor: boolean): void {
+    this.state.hideCursor = normalizeHideCursor(hideCursor);
     this.commit();
   }
 

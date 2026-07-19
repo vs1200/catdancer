@@ -85,8 +85,10 @@ export class OptionsPanel {
   private onOpenChange?: (open: boolean) => void;
 
   private readonly closeButton: HTMLButtonElement;
-  /** 全画面トグルボタン。未対応ブラウザでは「表示」セクションごと生成しないため null。 */
+  /** 全画面トグルボタン。Fullscreen API 未対応ブラウザでは行を生成しないため null。 */
   private readonly fullscreenButton: HTMLButtonElement | null;
+  /** マウスカーソル非表示モードのチェックボックス（「表示」セクション）。 */
+  private readonly hideCursorInput: HTMLInputElement;
   private readonly modeSelect: HTMLSelectElement;
   /** 動きの速さ select（manual/auto 両モードに効くため常時有効）。 */
   private readonly speedSelect: HTMLSelectElement;
@@ -147,19 +149,37 @@ export class OptionsPanel {
     closeButton.addEventListener("click", () => this.close());
     header.append(title, closeButton);
 
-    // --- 表示セクション（全画面トグル） ---
-    // Fullscreen API 未対応の環境では死んだボタンを出さない（セクションごと生成しない）。
-    // 生成できた時だけ card へ差し込む（差し込みは append 段で判定）。
-    let fullscreenButton: HTMLButtonElement | null = null;
-    let displaySection: HTMLElement | null = null;
-    if (isFullscreenSupported()) {
-      displaySection = document.createElement("section");
-      displaySection.className = "cd-options-section";
-      const displayTitle = document.createElement("h3");
-      displayTitle.className = "cd-options-section-title";
-      displayTitle.textContent = "表示";
-      displaySection.appendChild(displayTitle);
+    // --- 表示セクション（マウスカーソル非表示 + 全画面トグル） ---
+    // カーソル非表示トグルは常時提供する。全画面ボタンは Fullscreen API 対応時のみ足す
+    // （未対応環境で死んだボタンを出さない）。
+    const displaySection = document.createElement("section");
+    displaySection.className = "cd-options-section";
+    const displayTitle = document.createElement("h3");
+    displayTitle.className = "cd-options-section-title";
+    displayTitle.textContent = "表示";
+    displaySection.appendChild(displayTitle);
 
+    // マウスカーソルを隠す（猫が物理カーソルを追う誤作動を防ぐ）。歯車付近・パネル表示中は
+    // main.ts 側で通常表示に戻す。change → settings.setHideCursor（永続化＋購読で実配線）。
+    const hideCursorRow = document.createElement("div");
+    hideCursorRow.className = "cd-options-row";
+    const hideCursorLabel = document.createElement("label");
+    hideCursorLabel.className = "cd-options-label";
+    hideCursorLabel.textContent = "マウスカーソルを隠す";
+    hideCursorLabel.htmlFor = "cd-hide-cursor-input";
+    const hideCursorInput = document.createElement("input");
+    hideCursorInput.type = "checkbox";
+    hideCursorInput.id = "cd-hide-cursor-input";
+    hideCursorInput.className = "cd-options-checkbox";
+    hideCursorInput.addEventListener("change", () => {
+      this.settings.setHideCursor(hideCursorInput.checked);
+    });
+    hideCursorRow.append(hideCursorLabel, hideCursorInput);
+    displaySection.appendChild(hideCursorRow);
+
+    // 全画面トグル（Fullscreen API 未対応環境ではボタンを生成しない）。
+    let fullscreenButton: HTMLButtonElement | null = null;
+    if (isFullscreenSupported()) {
       const fullscreenRow = document.createElement("div");
       fullscreenRow.className = "cd-options-row";
       fullscreenButton = document.createElement("button");
@@ -460,10 +480,8 @@ export class OptionsPanel {
     volSection.append(volTitle, volRow, muteRow);
 
     card.appendChild(header);
-    // 全画面対応環境でのみ「表示」セクションをヘッダ直後（モードセクションの前）へ差し込む。
-    if (displaySection) {
-      card.appendChild(displaySection);
-    }
+    // 「表示」セクションはヘッダ直後（モードセクションの前）へ常に差し込む（カーソル非表示トグルを含む）。
+    card.appendChild(displaySection);
     card.append(modeSection, bgSection, critterSection);
     // 種別が渡された時だけ「出現する種類」を差し込む（空セクションを出さない）。
     if (this.autoTypeChecks.length > 0) {
@@ -475,6 +493,7 @@ export class OptionsPanel {
     this.element = overlay;
     this.closeButton = closeButton;
     this.fullscreenButton = fullscreenButton;
+    this.hideCursorInput = hideCursorInput;
     this.modeSelect = modeSelect;
     this.speedSelect = speedSelect;
     this.presetRow = presetRow;
@@ -638,6 +657,7 @@ export class OptionsPanel {
     this.syncAutoTypes(settings.autoDisabledTypes);
     this.syncVolume();
     this.syncMute(settings.muted);
+    this.syncHideCursor(settings.hideCursor);
   }
 
   /**
@@ -664,6 +684,13 @@ export class OptionsPanel {
   private syncMute(muted: boolean): void {
     if (this.muteInput.checked !== muted) {
       this.muteInput.checked = muted;
+    }
+  }
+
+  /** カーソル非表示チェックボックスを settings.hideCursor から復元する（外部変更にも追従）。 */
+  private syncHideCursor(hideCursor: boolean): void {
+    if (this.hideCursorInput.checked !== hideCursor) {
+      this.hideCursorInput.checked = hideCursor;
     }
   }
 
