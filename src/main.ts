@@ -394,6 +394,12 @@ async function bootstrap(): Promise<void> {
   let prevSpeedScale = settings.settings.speedScale;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join("\u0000");
+  // 背景も他フィールドと同型の差分ガードで反映する。無条件 apply だと画像背景時に音量/出現間隔スライダの
+  // 連続通知（ドラッグ中の40ms間隔）ごとに IndexedDB 取得＋再デコード＋GPU テクスチャ差し替えが走るため、
+  // type/color/imageId のいずれかが変わった時だけ apply する（起動時の初期描画は bootstrap の初回 apply が担う）。
+  let prevBgType = settings.settings.background.type;
+  let prevBgColor = settings.settings.background.color;
+  let prevBgImageId = settings.settings.background.imageId;
   settings.subscribe((next) => {
     audio.setMasterVolume(next.masterVolume);
     if (next.muted !== prevMuted) {
@@ -406,7 +412,13 @@ async function bootstrap(): Promise<void> {
       // パネル開閉状態は applyCursorVisibility 内で加味する（パネル開なら常に通常表示）。
       applyCursorVisibility();
     }
-    void backgroundController.apply(next);
+    const bg = next.background;
+    if (bg.type !== prevBgType || bg.color !== prevBgColor || bg.imageId !== prevBgImageId) {
+      prevBgType = bg.type;
+      prevBgColor = bg.color;
+      prevBgImageId = bg.imageId;
+      void backgroundController.apply(next);
+    }
     if (next.autoSpawnIntervalMs !== prevInterval) {
       prevInterval = next.autoSpawnIntervalMs;
       autoMode.setInterval(next.autoSpawnIntervalMs);
