@@ -398,11 +398,17 @@ export class AudioManager implements AudioSink {
   }
 
   /**
-   * サンプル走行音のループ声部を生成する（LoopVoice 互換）。run バッファ集合を 1 クリップずつ再生し、
-   * 周回（onended）ごとにランダムで選び直して単調さを避ける（＝走行音も 3 種からランダム/周回で変化）。
-   * level→gain は setTargetAtTime で平滑追従（setLevel(0) で無音へ収束）、stop で現行 source と gain を切断。
-   * present-gate（不在/pause 時の setLevel(0)/silence/stop）は既存経路のまま効く。gain 0 の間もチェーンは
-   * 裏で回り続けるが無音・軽量（同時に走る source は常に 1 本）。
+   * サンプル走行音のループ声部を生成する（LoopVoice 互換）。run バッファ集合を gapless（無音ギャップ無し）に
+   * 連結再生する。onended 起点の再トリガだと主スレッド遅延ぶんの無音がクリップ境界に入り走行音がプツプツ
+   * するため、AudioContext クロックで各クリップの開始時刻を事前計算する先読みスケジューリング
+   * （"A Tale of Two Clocks" パターン）に切り替える。nextStartTime を保持し、各クリップを
+   * `src.start(nextStartTime)` で未来時刻に予約→`nextStartTime += buffer.duration` で連結し、常に 1 クリップ
+   * 先まで予約済みにしておく（初回は 2 本予約）。現在再生中クリップの onended 発火時点で次クリップは既に予約・
+   * 再生開始済みなので、onended は「クリーンアップ＋次の 1 本を予約」だけ行えばよく、コールバック遅延に依存せず
+   * サンプル精度で連結できる。周回ごとに 3 種からランダムに選び直して単調さ（mechanical/repetitive）を避ける。
+   * level→gain は setTargetAtTime で平滑追従（setLevel(0) で無音へ収束）、stop で予約済み全ソースと gain を切断。
+   * present-gate（不在/pause 時の setLevel(0)/silence/stop）は既存経路のまま効く。gain 0 の間も予約は裏で
+   * 回り続けるが無音・軽量（同時に走る source は常に 2 本＝再生中＋次の予約）。
    */
   private createSampleLoopVoice(
     buffers: AudioBuffer[],
@@ -415,28 +421,48 @@ export class AudioManager implements AudioSink {
     level.connect(output);
 
     let stopped = false;
-    let current: AudioBufferSourceNode | null = null;
+    // 予約済み（再生中＋未来予約）の全ソースを追跡し、stop() で確実に stop+disconnect する（リーク/二重再生防止）。
+    const scheduled = new Set<AudioBufferSourceNode>();
+    // 次クリップを開始する AudioContext クロック時刻。各クリップを buffer.duration ぶん先へ連結して予約する。
+    let nextStartTime = context.currentTime;
 
-    const playNext = (): void => {
+    // 次の 1 クリップを nextStartTime に予約する（周回のたび 3 種からランダムに選び直して単調さを避ける）。
+    // n1: createBufferSource/start の稀な throw（実行中の context close 等）でループが無言死・ノード孤児化しない
+    // よう try/catch で覆い、警告のみ出す（createLoop の catch→NULL_LOOP 方針と整合）。
+    const scheduleNext = (): void => {
       if (stopped) {
         return;
       }
-      const index = pickRandomIndex(buffers.length);
-      this.lastSampleIndex.set(id, index);
-      const src = context.createBufferSource();
-      src.buffer = buffers[index];
-      src.connect(level);
-      src.onended = (): void => {
-        src.disconnect();
-        // 停止していなければ次のクリップへ（周回のたびランダムに選び直す）。
-        if (!stopped && current === src) {
-          playNext();
-        }
-      };
-      current = src;
-      src.start();
+      try {
+        const index = pickRandomIndex(buffers.length);
+        this.lastSampleIndex.set(id, index);
+        const buffer = buffers[index];
+        const src = context.createBufferSource();
+        src.buffer = buffer;
+        src.connect(level);
+        scheduled.add(src);
+        src.onended = (): void => {
+          scheduled.delete(src);
+          src.disconnect();
+          // 「常に 1 クリップ先まで予約済み」を保つため、終了ぶんを次の 1 本で補充する（gapless 維持）。
+          if (!stopped) {
+            scheduleNext();
+          }
+        };
+        // 予約が遅延で currentTime より過去へ落ちた場合（背景タブのコールバック絞り等）は currentTime へスナップ
+        // し、連鎖的な即時再生（重なり）を防ぐ。通常のアクティブ時は nextStartTime > currentTime で連続予約になる。
+        const startAt = nextStartTime > context.currentTime ? nextStartTime : context.currentTime;
+        src.start(startAt);
+        nextStartTime = startAt + buffer.duration;
+      } catch (error) {
+        console.warn(`サンプルループSE の予約に失敗しました: ${id}`, error);
+      }
     };
-    playNext();
+
+    // 初回は 2 本（再生中＋次）を予約して開始する。以後は各 onended が 1 本ずつ補充し、常に 1 クリップ先まで
+    // 予約済みの状態を保つ（＝境界で無音ギャップが入らずサンプル精度でシームレスに連結される）。
+    scheduleNext();
+    scheduleNext();
 
     return {
       setLevel(value: number): void {
@@ -455,13 +481,17 @@ export class AudioManager implements AudioSink {
           return;
         }
         stopped = true;
-        try {
-          current?.stop();
-        } catch {
-          // 既に停止済みでも問題なし。
+        // 予約済み（再生中＋未来予約）を全て stop+disconnect する。stop() が誘発する onended は
+        // stopped=true を見て再予約しない（scheduled は clear 済みで delete/disconnect も安全な no-op）。
+        for (const src of scheduled) {
+          try {
+            src.stop();
+          } catch {
+            // 既に停止済み/未再生でも問題なし。
+          }
+          src.disconnect();
         }
-        current?.disconnect();
-        current = null;
+        scheduled.clear();
         level.disconnect();
       },
     };

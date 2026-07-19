@@ -75,9 +75,11 @@ async function bootstrap(): Promise<void> {
   registerCritterSounds(audio);
   audio.attachAutoResume(window);
   // [UR-3] ネズミの走行音/鳴き声をユーザー提供の実録サンプルへ差し替える（合成→サンプル）。
-  // 走行ループ(createLoop)を張る switchTo より前に await して、最初からサンプル版で鳴らす。
+  // m2: ここでは fetch+decode(~281KB×6) を await せず開始だけして、直後の texture ロード(Promise.all)と
+  // 重ねる（初回描画レイテンシ短縮）。走行ループ(createLoop)を張る switchTo の直前で await samplesReady して、
+  // 「サンプル登録が createLoop より前に完了する」不変条件は維持する（最初からサンプル版で鳴る）。
   // 内部で例外を握りつぶす設計なので、ロード失敗でも起動失敗フォールバックには波及せず合成SEが残る。
-  await loadCritterSamples(audio);
+  const samplesReady = loadCritterSamples(audio);
 
   // 種別レジストリへ登録（ネズミ＋dangle系: 猫じゃらし/おもちゃ）。
   // 登録済み全種別の hideRadius から margin を決める（本体＋尻尾/揺れを隠せる幅）。
@@ -417,6 +419,10 @@ async function bootstrap(): Promise<void> {
   optionsButton.mount(document.body);
 
   // 復元した mode でモードを開始する。
+  // m2: サンプルロード(loadCritterSamples)を texture ロードと重ねて開始していたので、走行ループ(createLoop)を
+  // 張る直前でここで await する。これで「サンプル登録が createLoop より前に完了する」不変条件を満たしつつ、
+  // 初回描画は samplesReady を待たずに進める（texture ロードと並行）。
+  await samplesReady;
   switchTo(settings.settings.mode);
 
   // タブ非表示（背景タブ）で現行モードを一時停止し、環境音ループの背景再生（無駄鳴り）を止める。
