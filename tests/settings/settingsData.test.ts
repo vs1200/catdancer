@@ -77,10 +77,16 @@ describe("clampVolume", () => {
     expect(clampVolume("abc")).toBe(DEFAULT_MASTER_VOLUME);
   });
 
-  it("数値文字列は解釈する", () => {
+  it("数値文字列は解釈する（前後空白・小数・指数・16進の Number() 挙動を維持）", () => {
     expect(clampVolume("0.25")).toBe(0.25);
     expect(clampVolume("2")).toBe(1);
     expect(clampVolume("-1")).toBe(0);
+    // coerceFiniteNumber は Number() の受理範囲を意図的に継承する。将来 regex 化などで
+    // 黙って受理範囲が変わらないよう不変条件として固定する（trim 後に Number() へ渡す）。
+    expect(clampVolume("  0.25  ")).toBe(0.25);
+    expect(clampVolume(".5")).toBe(0.5);
+    expect(clampVolume("1e3")).toBe(1); // Number("1e3")=1000 → [0,1] へクランプ
+    expect(clampVolume("0x1f")).toBe(1); // Number("0x1f")=31 → [0,1] へクランプ
   });
 
   it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定音量へ", () => {
@@ -93,6 +99,14 @@ describe("clampVolume", () => {
     expect(clampVolume([])).toBe(DEFAULT_MASTER_VOLUME);
     expect(clampVolume([5])).toBe(DEFAULT_MASTER_VOLUME);
     expect(clampVolume({})).toBe(DEFAULT_MASTER_VOLUME);
+  });
+
+  it("Symbol/BigInt は例外を投げず既定音量へ", () => {
+    // 旧実装 `typeof!=="number" ? Number(value)` だと Number(Symbol()) が TypeError を投げた。
+    // coerceFiniteNumber は typeof 分岐で number/string 以外を素通しするため例外を投げず既定へ落ちる。
+    expect(() => clampVolume(Symbol("x"))).not.toThrow();
+    expect(clampVolume(Symbol("x"))).toBe(DEFAULT_MASTER_VOLUME);
+    expect(clampVolume(10n)).toBe(DEFAULT_MASTER_VOLUME);
   });
 });
 
