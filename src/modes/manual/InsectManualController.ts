@@ -1,6 +1,7 @@
 import type { Texture } from "pixi.js";
 import type { Scene } from "../../app/Scene";
 import type { AudioSink } from "../../audio/AudioManager";
+import { panFromX } from "../../audio/audioMath";
 import { CritterAudioController } from "../../audio/CritterAudioController";
 import { CritterPopulation } from "../../critters/CritterPopulation";
 import { getCritterType } from "../../critters/registry";
@@ -136,16 +137,22 @@ export class InsectManualController implements ManualController {
     // 2) world 外へ抜けた／退場アニメ完了の虫を despawn（完全破棄）。
     this.population.reapExited(scene.worldBounds);
     // 3) 羽音: present=虫が居る間、level=虫の最大速度連動（複数の羽音を 1 本で代表）。
-    let maxSpeed = 0;
+    //    [UR4-4] 左右定位は最速個体の x を代表点にする（羽音も最も活発な虫の位置から鳴る）。
     const list = this.population.list;
+    let maxSpeed = 0;
+    // 代表 x の既定は最初の虫（居なければ中央）。以後は最速個体の x で上書きする。
+    let fastestX =
+      list.length > 0 ? list[0].state.position.x : scene.worldBounds.viewport.width / 2;
     for (let i = 0; i < list.length; i++) {
-      const v = list[i].state.velocity;
-      const s = Math.hypot(v.x, v.y);
+      const st = list[i].state;
+      const s = Math.hypot(st.velocity.x, st.velocity.y);
       if (s > maxSpeed) {
         maxSpeed = s;
+        fastestX = st.position.x;
       }
     }
-    this.audioCtrl.update(maxSpeed, dtSeconds, this.population.count > 0);
+    const pan = panFromX(fastestX, scene.worldBounds.viewport.width);
+    this.audioCtrl.update(maxSpeed, dtSeconds, this.population.count > 0, pan);
   }
 
   /**

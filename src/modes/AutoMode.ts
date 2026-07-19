@@ -1,6 +1,7 @@
 import type { Texture } from "pixi.js";
 import type { Scene } from "../app/Scene";
 import type { AudioSink } from "../audio/AudioManager";
+import { panFromX } from "../audio/audioMath";
 import { CritterAudioController } from "../audio/CritterAudioController";
 import { type CritterAudioState, driveForType, groupMaxSpeedByType } from "../audio/perTypeLevels";
 import { CATCH_ID } from "../audio/sounds";
@@ -260,9 +261,11 @@ export class AutoMode implements Mode {
       buf.push(list[i].state);
     }
     const maxByType = groupMaxSpeedByType(buf);
+    // [UR4-4] 各種別の走行音/羽音を「その種別の最速個体の x」で左右定位する（横断ネズミが左→右で pan も左→右）。
+    const vpWidth = scene.worldBounds.viewport.width;
     for (const [typeId, ctrl] of this.audioCtrls) {
       const drive = driveForType(maxByType, typeId);
-      ctrl.update(drive.maxSpeed, dtSeconds, drive.present);
+      ctrl.update(drive.maxSpeed, dtSeconds, drive.present, panFromX(drive.x, vpWidth));
     }
   }
 

@@ -4,10 +4,22 @@
  * 集計する。AutoMode はこの集計を種別ごとの CritterAudioController の駆動に使う。
  */
 
-/** critter が SE 集計に必要とする最小状態（typeId と velocity のみ）。CritterState はこれに構造適合する。 */
+/**
+ * critter が SE 集計に必要とする最小状態（typeId / velocity / position.x）。CritterState はこれに構造適合する。
+ * [UR4-4] position.x は代表 pan（左右定位）算出のために最速個体の x を追う用途で読む。
+ */
 export interface CritterAudioState {
   typeId: string;
   velocity: { x: number; y: number };
+  position: { x: number };
+}
+
+/** 1 種別ぶんのグループ集計値（最大速度＋その最速個体の代表 x）。 */
+export interface TypeAudioGroup {
+  /** その種別の最大速度(px/秒)。 */
+  maxSpeed: number;
+  /** [UR4-4] その最速個体の x(px)。代表 pan の算出に使う。 */
+  x: number;
 }
 
 /** 1 種別ぶんの SE 駆動値。present=false のとき move レベル0・voice 非発火にする。 */
@@ -16,20 +28,25 @@ export interface TypeAudioDrive {
   present: boolean;
   /** その種別の最大速度(px/秒)。present=false のとき 0。 */
   maxSpeed: number;
+  /** [UR4-4] 代表 x(px)＝最速個体の x。present=false のとき 0（中央扱い）。 */
+  x: number;
 }
 
 /**
- * critter 群を typeId でグループ化し、種別ごとの最大速度(px/秒)を返す純関数。
+ * critter 群を typeId でグループ化し、種別ごとの「最大速度(px/秒)＋その最速個体の代表 x(px)」を返す純関数。
+ * [UR4-4] x は最大速度を更新した個体のものを併走記録する（最も活発に鳴っている個体の位置で左右定位するため）。
  * 出現している種別のみを Map に含める（未出現種別はキーを持たない）。
  */
-export function groupMaxSpeedByType(states: readonly CritterAudioState[]): Map<string, number> {
-  const maxByType = new Map<string, number>();
+export function groupMaxSpeedByType(
+  states: readonly CritterAudioState[],
+): Map<string, TypeAudioGroup> {
+  const maxByType = new Map<string, TypeAudioGroup>();
   for (let i = 0; i < states.length; i++) {
     const s = states[i];
     const speed = Math.hypot(s.velocity.x, s.velocity.y);
     const prev = maxByType.get(s.typeId);
-    if (prev === undefined || speed > prev) {
-      maxByType.set(s.typeId, speed);
+    if (prev === undefined || speed > prev.maxSpeed) {
+      maxByType.set(s.typeId, { maxSpeed: speed, x: s.position.x });
     }
   }
   return maxByType;
@@ -37,15 +54,15 @@ export function groupMaxSpeedByType(states: readonly CritterAudioState[]): Map<s
 
 /**
  * グループ集計から特定 typeId の駆動値を得る。
- * 出現していない種別は present=false, maxSpeed=0（＝その種別のSEは鳴らさない）。
+ * 出現していない種別は present=false, maxSpeed=0, x=0（＝その種別のSEは鳴らさない・pan は中央）。
  */
 export function driveForType(
-  maxByType: ReadonlyMap<string, number>,
+  maxByType: ReadonlyMap<string, TypeAudioGroup>,
   typeId: string,
 ): TypeAudioDrive {
-  const maxSpeed = maxByType.get(typeId);
-  if (maxSpeed === undefined) {
-    return { present: false, maxSpeed: 0 };
+  const group = maxByType.get(typeId);
+  if (group === undefined) {
+    return { present: false, maxSpeed: 0, x: 0 };
   }
-  return { present: true, maxSpeed };
+  return { present: true, maxSpeed: group.maxSpeed, x: group.x };
 }
