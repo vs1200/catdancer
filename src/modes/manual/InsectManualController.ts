@@ -2,11 +2,9 @@ import type { Texture } from "pixi.js";
 import type { Scene } from "../../app/Scene";
 import type { AudioSink } from "../../audio/AudioManager";
 import { CritterAudioController } from "../../audio/CritterAudioController";
-import type { Critter } from "../../critters/Critter";
-import { spawnCritter } from "../../critters/Critter";
+import { CritterPopulation } from "../../critters/CritterPopulation";
 import { getCritterType } from "../../critters/registry";
 import { INSECT_TYPE_ID } from "../../critters/types/insect";
-import { hasExitedWorld } from "../../movement/CrossMovement";
 import {
   ErraticMovement,
   erraticEntryVelocity,
@@ -37,9 +35,12 @@ const MAX_ACTIVE = 18;
  * クリック(タップ)した位置に虫を 1 体 spawn し、既存の {@link ErraticMovement}（不規則ダッシュ）で
  * 素早く飛び回らせ、やがて world 外へ抜けたら despawn する。連続クリックで複数を同時に出せる。
  *
+ * active list 管理・自己修復 prune・world 退出/expired despawn は {@link CritterPopulation} へ委譲し、
+ * cap/evict・spawn 計画・羽音は本コントローラ固有として残す（挙動は委譲前と不変）。
+ *
  * - onPointerDown(worldX, worldY): クリック位置を始点にした {@link planErraticFromPoint} の plan で
- *   虫を spawn（自前リストで保持）。上限 MAX_ACTIVE で頭打ちし、超過は最古を退場させる。
- * - update: 各虫を更新し、world 外に出たものを despawn（後方走査で in-place 除去）。羽音は present-gate
+ *   虫を spawn（Population が保持）。上限 MAX_ACTIVE で頭打ちし、超過は Population.list の最古を退場させる。
+ * - update: Population で各虫を更新し、world 外/退場完了のものを despawn する。羽音は present-gate
  *   （虫が居る間・最大速度連動）で 1 本の {@link CritterAudioController} を駆動する（複数の羽音を
  *   個別に鳴らさず 1 本で代表。AutoMode の per-type 方式に倣う）。
  * - start: 選択直後の初期フィードバックとして中央に 1 体出す。以後はクリックで追加。
@@ -52,8 +53,11 @@ export class InsectManualController implements ManualController {
   private readonly audioCtrl: CritterAudioController;
   private readonly rng: () => number;
   private readonly baseSize: number;
-  /** 生成順を保つアクティブな虫の集合（cap 超過時に先頭＝最古から退場させる）。 */
-  private readonly critters: Critter[] = [];
+  /**
+   * アクティブな虫の集合（active list 管理・自己修復 prune・world 退出/expired despawn）を担う Facade。
+   * cap/evict（{@link MAX_ACTIVE}）は Insect 固有なので Population.list の最古を見て despawn する。
+   */
+  private readonly population: CritterPopulation;
   private running = false;
   private paused = false;
 
@@ -68,6 +72,7 @@ export class InsectManualController implements ManualController {
     this.audioCtrl = new CritterAudioController(deps.audio, type.sounds, {
       scurry: type.moveLevel,
     });
+    this.population = new CritterPopulation({ scene: deps.scene });
   }
 
   start(): void {
@@ -89,10 +94,7 @@ export class InsectManualController implements ManualController {
     this.running = false;
     this.audioCtrl.stop();
     // 全虫を despawn（表示物ごと完全破棄）してリストを空にする＝種別切替でリークしない。
-    for (let i = 0; i < this.critters.length; i++) {
-      this.deps.scene.despawn(this.critters[i]);
-    }
-    this.critters.length = 0;
+    this.population.despawnAll();
   }
 
   /** 虫の動きの速さ倍率（実行中でも即反映。Critter.update が dt に乗じて movement 全体へ適用）。 */
@@ -120,36 +122,22 @@ export class InsectManualController implements ManualController {
     }
     const { scene } = this.deps;
     this.ctx.world = scene.worldBounds;
-    // 0) 外部 despawn（DEV `__catScene.clear()` 等）で破棄された虫を内部リストから除去する自己修復。
-    //    破棄済み Container を更新すると syncView が null 参照でクラッシュするため、後方走査で splice する。
-    //    既に destroy 済みなので scene.despawn は呼ばない（二重破棄回避）。
-    for (let i = this.critters.length - 1; i >= 0; i--) {
-      if (this.critters[i].destroyed) {
-        this.critters.splice(i, 1);
-      }
-    }
-    // 1) 各虫を更新（自前リストを走査。scene には本コントローラの虫しか居ない）。
-    for (let i = 0; i < this.critters.length; i++) {
-      this.critters[i].update(dtSeconds, this.ctx);
-    }
-    // 2) world 外へ抜けた虫を despawn（後方走査で in-place 除去＝配列を作り直さない）。
-    for (let i = this.critters.length - 1; i >= 0; i--) {
-      const c = this.critters[i];
-      if (hasExitedWorld(c.state.position, scene.worldBounds) || c.hasExpired) {
-        this.critters.splice(i, 1);
-        scene.despawn(c);
-      }
-    }
+    // 0-1) 自己修復 prune（破棄済み虫の除去）→ 各虫を更新。破棄済み Container を更新すると
+    //      syncView が null 参照でクラッシュするため prune を先に行う（順序は Population 内で保証）。
+    this.population.update(dtSeconds, this.ctx);
+    // 2) world 外へ抜けた／退場アニメ完了の虫を despawn（完全破棄）。
+    this.population.reapExited(scene.worldBounds);
     // 3) 羽音: present=虫が居る間、level=虫の最大速度連動（複数の羽音を 1 本で代表）。
     let maxSpeed = 0;
-    for (let i = 0; i < this.critters.length; i++) {
-      const v = this.critters[i].state.velocity;
+    const list = this.population.list;
+    for (let i = 0; i < list.length; i++) {
+      const v = list[i].state.velocity;
       const s = Math.hypot(v.x, v.y);
       if (s > maxSpeed) {
         maxSpeed = s;
       }
     }
-    this.audioCtrl.update(maxSpeed, dtSeconds, this.critters.length > 0);
+    this.audioCtrl.update(maxSpeed, dtSeconds, this.population.count > 0);
   }
 
   /**
@@ -168,10 +156,11 @@ export class InsectManualController implements ManualController {
    * 席を空ける（連打でも数が単調増加しない＝リーク防止）。
    */
   private spawnAt(x: number, y: number): void {
-    if (this.critters.length >= MAX_ACTIVE) {
-      const oldest = this.critters.shift();
+    // cap/evict は Insect 固有。上限に達していれば Population.list の最古(先頭)を先に退場させる。
+    if (this.population.count >= MAX_ACTIVE) {
+      const oldest = this.population.list[0];
       if (oldest) {
-        this.deps.scene.despawn(oldest);
+        this.population.despawn(oldest);
       }
     }
     const plan = planErraticFromPoint(
@@ -181,7 +170,7 @@ export class InsectManualController implements ManualController {
       undefined,
       this.baseSize,
     );
-    const critter = spawnCritter({
+    this.population.spawn({
       typeId: INSECT_TYPE_ID,
       bodyTexture: this.deps.bodyTexture,
       movement: new ErraticMovement(plan),
@@ -192,8 +181,6 @@ export class InsectManualController implements ManualController {
         facing: plan.facing,
       },
     });
-    this.deps.scene.add(critter);
-    this.critters.push(critter);
   }
 
   /**
@@ -201,7 +188,8 @@ export class InsectManualController implements ManualController {
    * 虫が 1 体も居なければ null（放置で 0 に戻った状態）。
    */
   debugSnapshot(): ManualControllerSnapshot | null {
-    const c = this.critters[this.critters.length - 1];
+    const list = this.population.list;
+    const c = list[list.length - 1];
     if (!c) {
       return null;
     }
@@ -215,7 +203,7 @@ export class InsectManualController implements ManualController {
       viewRotation: c.view.rotation,
       viewScaleY: c.view.scale.y,
       tailTip: null,
-      insectCount: this.critters.length,
+      insectCount: this.population.count,
     };
   }
 }
