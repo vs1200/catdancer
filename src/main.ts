@@ -527,8 +527,10 @@ async function bootstrap(): Promise<void> {
         void toggleAppFullscreen();
         break;
       case "toggle-mode":
-        // 現在と逆モードへ（既存の switchTo を再利用。新規挙動は作らない）。
-        switchTo(currentModeName === "auto" ? "manual" : "auto");
+        // 現在と逆モードへ。settings.setMode 経由にして永続化し、購読(next.mode!==prevMode→switchTo)で
+        // 実切替、設定パネルのモード select も syncMode で追従させる（クリック切替と同じ挙動＝表示ズレ/
+        // reload 戻りを防ぐ）。
+        settings.setMode(currentModeName === "auto" ? "manual" : "auto");
         break;
     }
   };
