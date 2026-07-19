@@ -1,12 +1,15 @@
 /**
  * [UR-5b] マウス操作モードの「ねこじゃらし」挙動の純ジオメトリ/物理ロジック（PixiJS/DOM 非依存＝Vitest 可能）。
  *
- * 挙動モデル（人が画面端から猫じゃらしを差し込んで振る）:
+ * [UR3-2/3] 挙動モデル（人が画面端から猫じゃらしを差し込んで振る）:
  * - 穂(head) はマウスへバネ的ラグで追従する（{@link springStep}）＝速く動かすと遅れて振れる「ふりふり」。
- * - 基部(hand) は「マウスに最も近い画面端」の外向きへ head から foxtail 長 L ぶん離れた点
- *   （{@link computeBasePosition}）。手が端/画面外側にあり穂が内側=中央寄りを向く。
- * - 最も近い端はヒステリシス付きで選び（{@link nearestEdge}）、端の切替でのガタつきを抑える。
- * - マウスが端に近いほど retract 0→1（{@link computeRetract}）で全体を端の外へスライドして隠す。
+ * - 基部(base) は viewport の周長を辿る「かなり遅い独立点」。ポインタを最寄り周上点へ投影した弧長
+ *   （{@link projectToPerimeter}）を target に、現在弧長を短い弧方向へ長い時定数で積分する（{@link approachArc}）。
+ *   端に垂直な直行移動では投影の足が動かず根元も動かない／端に沿う（周回）移動でのみ根元が周上を旅する。
+ * - 穂先(tip) は base から穂方向 unit(head−base) へ固定長 L の点＝穂先が base 周りに半径 L の弧を描く
+ *   （{@link computeFoxtailRig}）。base と tip の距離は常に L だが向きは head 追従で可変。
+ * - マウスが端に近いほど retract 0→1（{@link computeRetract}）で rig 全体（base pivot と tip の両方）を
+ *   端の外へスライドして隠す。押し出し量を L 以上に取ることで、穂先が内向きに最大 L 戻っても端の外に残る。
  *
  * 表示側（FoxtailManualController, PixiJS 依存）はこの純ロジックの結果を Sprite の位置/回転へ載せるだけ。
  */
@@ -299,6 +302,55 @@ export function approachArc(
   const tau = Math.max(1e-4, smoothTime);
   const a = 1 - Math.exp(-dt / tau);
   return wrapArc(c + delta * a, perimeter);
+}
+
+/** {@link computeFoxtailRig} の結果（base pivot・穂先 tip・穂の向き heading）。 */
+export interface FoxtailRig {
+  /** スプライトの配置点（周上点を retract 外向きに押し出した点）。回転 pivot。 */
+  base: Vec2;
+  /** 穂先ワールド座標（base から heading 方向へ固定長 length）。retract 検証・観測用。 */
+  tip: Vec2;
+  /** 穂の向き(rad)= atan2(head−base)。aim 退化時は prevHeading を維持。 */
+  heading: number;
+}
+
+/**
+ * [UR3-2/3] 表示 rig（base pivot と 穂先 tip）を求める純関数（PixiJS 非依存＝Vitest 可能）。
+ *
+ * - base = 周上点 perimeterPt を outwardAngle 方向へ retractShift だけ押し出した点。
+ *   retract=0 では retractShift=0 で base = perimeterPt（端上）＝通常追従では周上を辿る。
+ * - heading = atan2(head − base)。head のバネラグで aim がオーバーシュートし穂が振れる。
+ *   aim が退化（|head−base| < aimMinPx）したら prevHeading を維持して atan2 ジッタを避ける。
+ * - tip = base から heading 方向へ固定長 length。穂先が base 周りに半径 length の弧を描く。
+ *
+ * retract の「しまう」不変条件: retractShift ≥ length + ε を満たせば、head が viewport 内の
+ * どこにあっても穂先が内向きに最大 length しか戻らないため、tip は端の外に ε 以上残り、base も
+ * (length+ε) 外にあるので **rig 全体が viewport 外**になる（穂先が画面内へ貫入しない）。
+ */
+export function computeFoxtailRig(
+  perimeterPt: Vec2,
+  outwardAngle: number,
+  retractShift: number,
+  head: Vec2,
+  length: number,
+  prevHeading: number,
+  aimMinPx: number,
+): FoxtailRig {
+  const base: Vec2 = {
+    x: perimeterPt.x + Math.cos(outwardAngle) * retractShift,
+    y: perimeterPt.y + Math.sin(outwardAngle) * retractShift,
+  };
+  const aimX = head.x - base.x;
+  const aimY = head.y - base.y;
+  let heading = prevHeading;
+  if (Math.hypot(aimX, aimY) >= aimMinPx) {
+    heading = Math.atan2(aimY, aimX);
+  }
+  const tip: Vec2 = {
+    x: base.x + Math.cos(heading) * length,
+    y: base.y + Math.sin(heading) * length,
+  };
+  return { base, tip, heading };
 }
 
 /**

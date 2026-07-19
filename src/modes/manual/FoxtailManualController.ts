@@ -7,6 +7,7 @@ import {
   approach,
   approachAngle,
   approachArc,
+  computeFoxtailRig,
   computeRetract,
   distanceToNearestEdge,
   edgeOutwardAngle,
@@ -54,10 +55,14 @@ const SPRING_DAMPING = 17;
 const RETRACT_THRESHOLD_PX = 96;
 
 /**
- * retract=1 で rig 全体を端の外へスライドさせる距離(px)。穂先(tip)が端を越えて画面外へ隠れるだけの量。
- * tip のみが可視最内点なので、端＋この距離ぶん外へ出せば完全に隠れる。
+ * retract=1 の押し出し量に足す余白(px)。押し出し量 retractShift = retract·(L + spriteHalfHeight + この値)。
+ *
+ * 新レンダリングモデルでは穂先 tip = base + L·unit(head−base) で、base を外向きに押し出しても head は
+ * 端付近(画面内)に残り aim が内向きになるため、穂先は base から内向きに最大 L 戻る。したがって固定量では
+ * なく **L に比例** して押し出さないと（L 未満だと穂先が (L−押し出し) だけ画面内へ貫入する）retract で
+ * 隠れない。L に加えスプライトの太さ半分(spriteHalfHeight)＋この余白を足し、穂先の太い端まで画面外へ出す。
  */
-const RETRACT_SHIFT_PX = 240;
+const RETRACT_MARGIN_PX = 24;
 
 /** 端方向(基部の retract スライド向き)を追う指数平滑の時定数(秒)。隅越えの 90 度スナップを消す。 */
 const OUTWARD_SMOOTH_TIME = 0.16;
@@ -253,30 +258,32 @@ export class FoxtailManualController implements ManualController {
       return;
     }
     const length = foxtailLength(vp, FOXTAIL_LENGTH_FRAC);
-    const retractShift = this.retract * RETRACT_SHIFT_PX;
+    // スケール: 基部pivot(0.02)から穂先(1.0)までの表示長を L に合わせる（大きく表示）。
+    const scale = length / ((1 - BASE_ANCHOR_X) * this.deps.handTexture.width);
+    // [M-1] retract の押し出しは L に比例させる（固定量だと穂先が (L−押し出し) px 画面内へ貫入して
+    // 「しまう」が機能しない）。L + スプライト太さ半分 + 余白ぶん押し出せば、穂先が内向きに最大 L 戻っても
+    // tip が端の外に残り、base(=L+余白 外)と合わせて rig 全体が viewport 外へ隠れる。
+    const spriteHalfHeight = 0.5 * this.deps.handTexture.height * scale;
+    const retractShift = this.retract * (length + spriteHalfHeight + RETRACT_MARGIN_PX);
 
     // [UR3-2/3] 基部(配置点)= 周長上の現在点 + 外向き·retractShift。周長を辿る独立した遅い点なので、
-    // 穂を振っても根元は動かず(UR3-2)、端反転でも高速掃引しない(UR3-3)。
+    // 穂を振っても根元は動かず(UR3-2)、端反転でも高速掃引しない(UR3-3)。穂先 tip = base + L·unit(head−base)。
     const p = perimeterPoint(vp, this.baseArc);
-    const outward: Vec2 = { x: Math.cos(this.outwardAngle), y: Math.sin(this.outwardAngle) };
-    this.base = { x: p.x + outward.x * retractShift, y: p.y + outward.y * retractShift };
-
-    // 回転: 基部→穂 の向き = atan2(head−base)。head のバネラグで aim がオーバーシュートし穂が振れる。
-    const aimX = this.head.x - this.base.x;
-    const aimY = this.head.y - this.base.y;
-    if (Math.hypot(aimX, aimY) >= AIM_MIN_PX) {
-      this.heading = Math.atan2(aimY, aimX);
-    } // 退化時は前フレーム heading を維持（atan2 ジッタ回避）。
-    // 穂先(tip)= base から固定長 L の点。head の向きへ aim するので tip が base 周りに半径 L の弧を描く。
-    this.headRender = {
-      x: this.base.x + Math.cos(this.heading) * length,
-      y: this.base.y + Math.sin(this.heading) * length,
-    };
+    const rig = computeFoxtailRig(
+      p,
+      this.outwardAngle,
+      retractShift,
+      this.head,
+      length,
+      this.heading,
+      AIM_MIN_PX,
+    );
+    this.base = rig.base;
+    this.heading = rig.heading; // 退化時は前フレーム heading 維持（computeFoxtailRig 内で判定）。
+    this.headRender = rig.tip;
     // 微小 sway を足して静止時も生きた感じに（過度でなく）。
     const sway = SWAY_AMP_RAD * Math.sin(this.time * SWAY_FREQ);
 
-    // スケール: 基部pivot(0.02)から穂先(1.0)までの表示長を L に合わせる（大きく表示）。
-    const scale = length / ((1 - BASE_ANCHOR_X) * this.deps.handTexture.width);
     this.sprite.scale.set(scale);
     this.sprite.position.set(this.base.x, this.base.y);
     this.sprite.rotation = this.heading + sway;
