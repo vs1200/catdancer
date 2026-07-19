@@ -82,6 +82,11 @@ export class AutoMode implements Mode {
   private readonly weights: number[];
   /** spawn 対象から除外する種別 id の集合（オプションの「出現する種類」ON/OFF）。 */
   private disabledTypes: Set<string> = new Set();
+  /**
+   * [UR4-2] 種別ごとの表示サイズ倍率（種別 id → 倍率）。spawnEntry で spawn 時に渡す。
+   * 未設定/未登録キーは 1（後方互換＝従来サイズ）。live-apply（setDisabledTypes と同じスタイル）。
+   */
+  private sizeMultipliers: Record<string, number> = {};
   /** spawnOne での有効種別マスク済み重みの再利用バッファ（毎回 new しない）。 */
   private readonly spawnWeightsBuf: number[] = [];
   private running = false;
@@ -184,6 +189,16 @@ export class AutoMode implements Mode {
    */
   setDisabledTypes(ids: readonly string[]): void {
     this.disabledTypes = new Set(ids);
+  }
+
+  /**
+   * [UR4-2] 種別ごとの表示サイズ倍率を設定する（実行中でも即反映）。spawnEntry が spawn 時に
+   * `sizeMultipliers[typeId] ?? 1` を渡すため、以後 spawn される該当種別の表示サイズへ反映される
+   * （既存の画面上 critter は次の spawn 更新まで従来サイズのまま＝速度倍率と同じ live-apply 方針）。
+   * 外部レコードを共有しないよう浅コピーして保持する（setDisabledTypes と同流儀）。
+   */
+  setSizeMultipliers(map: Record<string, number>): void {
+    this.sizeMultipliers = { ...map };
   }
 
   /**
@@ -324,6 +339,8 @@ export class AutoMode implements Mode {
       spawn: { position: plan.position, velocity: plan.velocity, facing: plan.facing },
       // [UR4-1] 現在の viewport を渡して baseSize を解像度非依存にスケールする（auto の全種別に効く）。
       viewport: scene.worldBounds.viewport,
+      // [UR4-2] 種別ごとのユーザー指定サイズ倍率を viewport sizeScale の上へ乗せる（未設定は 1）。
+      sizeMultiplier: this.sizeMultipliers[entry.typeId] ?? 1,
     });
   }
 }

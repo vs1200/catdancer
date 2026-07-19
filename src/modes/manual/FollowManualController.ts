@@ -25,6 +25,12 @@ export interface FollowManualControllerDeps {
   /** ポインタ入力（本コントローラが attach/detach を占有管理する。ManualMode 経由で共有）。 */
   pointer: PointerInput;
   scene: Scene;
+  /**
+   * [UR4-2] この種別のユーザー指定表示サイズ倍率（UR4-1 の viewport sizeScale の上へ乗せる純増倍率）。
+   * 省略/undefined は 1（従来サイズ）。start の spawnCritter へ渡す。manual は同時 1 体なので、倍率変更は
+   * main が rebuildCurrent()（＝新 deps の factory で作り直し）で反映する。
+   */
+  sizeMultiplier?: number;
 }
 
 /**
@@ -105,6 +111,8 @@ export class FollowManualController implements ManualController {
       spawn: { position: { x: vp.width / 2, y: vp.height / 2 } },
       // [UR4-1] 現在の viewport を渡して baseSize を解像度非依存にスケールする。
       viewport: vp,
+      // [UR4-2] この種別のユーザー指定サイズ倍率を viewport sizeScale の上へ乗せる（未設定は 1）。
+      sizeMultiplier: this.deps.sizeMultiplier,
     });
     scene.add(this.critter);
     this.audioCtrl.start();

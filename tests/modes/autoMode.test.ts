@@ -5,7 +5,7 @@ import type { AudioSink } from "../../src/audio/AudioManager";
 import { CATCH_ID } from "../../src/audio/sounds";
 import type { LoopVoice } from "../../src/audio/synth";
 import { createWorldBounds } from "../../src/core/worldBounds";
-import type { Critter } from "../../src/critters/Critter";
+import type { Critter, SpawnCritterParams } from "../../src/critters/Critter";
 import type { CritterSoundSet, CritterType } from "../../src/critters/CritterType";
 import { clearCritterTypes, registerCritterType } from "../../src/critters/registry";
 import { AutoMode, type AutoModeEntry } from "../../src/modes/AutoMode";
@@ -568,5 +568,76 @@ describe("AutoMode: CritterPopulation 委譲の不変条件", () => {
 
     // 3 体すべてが scene.despawn され Population が空になる（despawn 数＝spawn 数）。
     expect(despawn).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * [UR4-2] AutoMode → spawnCritter への種別ごとのサイズ倍率配線（Pixi 非依存・createCritter seam）。
+ *
+ * setSizeMultipliers で保持したレコードから spawnEntry が `sizeMultipliers[typeId] ?? 1` を
+ * spawn params の sizeMultiplier として渡すことを、createCritter seam で捕捉して観測する
+ * （実サイズ合成 size=baseSize×viewportScale×multiplier は spawnCritterSize.test で固定済み）。
+ */
+describe("AutoMode: 種別サイズ倍率の配線 (UR4-2)", () => {
+  beforeEach(() => {
+    registerCritterType(makeSpawnableType(SPAWN_VEHICLE));
+  });
+
+  afterEach(() => {
+    clearCritterTypes();
+  });
+
+  /** createCritter seam に渡る params を捕捉する running でない AutoMode を作る。 */
+  function makeCapturingMode(captured: SpawnCritterParams[]): AutoMode {
+    return new AutoMode({
+      scene: makeFakeScene(),
+      entries: [entry(SPAWN_VEHICLE)],
+      audio: makeFakeAudio().sink,
+      intervalMs: 100000,
+      rng: () => 0,
+      createCritter: (p) => {
+        captured.push(p);
+        return makeDelegCritter() as unknown as Critter;
+      },
+    });
+  }
+
+  it("setSizeMultipliers で指定した種別の sizeMultiplier が spawn へ渡る", () => {
+    const captured: SpawnCritterParams[] = [];
+    const mode = makeCapturingMode(captured);
+    mode.setSizeMultipliers({ [SPAWN_VEHICLE]: 1.6 });
+    mode.spawnType(SPAWN_VEHICLE);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].sizeMultiplier).toBe(1.6);
+  });
+
+  it("未設定の種別は sizeMultiplier=1（後方互換）", () => {
+    const captured: SpawnCritterParams[] = [];
+    const mode = makeCapturingMode(captured);
+    // setSizeMultipliers を呼ばない → レコード空 → 1 フォールバック。
+    mode.spawnType(SPAWN_VEHICLE);
+    expect(captured[0].sizeMultiplier).toBe(1);
+  });
+
+  it("setSizeMultipliers は live-apply（再設定で次の spawn から新倍率）", () => {
+    const captured: SpawnCritterParams[] = [];
+    const mode = makeCapturingMode(captured);
+    mode.setSizeMultipliers({ [SPAWN_VEHICLE]: 0.6 });
+    mode.spawnType(SPAWN_VEHICLE);
+    mode.setSizeMultipliers({ [SPAWN_VEHICLE]: 2.0 });
+    mode.spawnType(SPAWN_VEHICLE);
+    expect(captured[0].sizeMultiplier).toBe(0.6);
+    expect(captured[1].sizeMultiplier).toBe(2.0);
+  });
+
+  it("外部レコードを共有しない（浅コピー保持）", () => {
+    const captured: SpawnCritterParams[] = [];
+    const mode = makeCapturingMode(captured);
+    const map = { [SPAWN_VEHICLE]: 1.3 };
+    mode.setSizeMultipliers(map);
+    // 呼び出し後に外部レコードを破壊しても、保持済みの値は変わらない。
+    map[SPAWN_VEHICLE] = 0.5;
+    mode.spawnType(SPAWN_VEHICLE);
+    expect(captured[0].sizeMultiplier).toBe(1.3);
   });
 });

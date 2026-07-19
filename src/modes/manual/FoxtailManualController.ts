@@ -27,6 +27,14 @@ export interface FoxtailManualControllerDeps {
   /** ポインタ入力（本コントローラが attach/detach を占有管理する。ManualMode 経由で共有）。 */
   pointer: PointerInput;
   scene: Scene;
+  /**
+   * [UR4-2] ねこじゃらしのユーザー指定表示サイズ倍率。foxtail(manual)は spawnCritter を通らず自前で
+   * viewport 相対に描くため、長さ L のみへ乗じる（render 内の 1 点）。省略/undefined は 1（従来サイズ）。
+   * retractShift/tip/base は L 派生なので自動追従する。viewport sizeScale は L に既に相対で織り込み済み
+   * （foxtailLength が min(w,h) 基準）なので、ここで別途 sizeScale は掛けない（二重掛け回避）。倍率変更は
+   * main が rebuildCurrent() で新 deps の factory から作り直して反映する。
+   */
+  sizeMultiplier?: number;
 }
 
 // --- feel 調整用の主要 tunable 定数（メインが微調整しうる。各値の効きはコメント参照） ---
@@ -257,7 +265,8 @@ export class FoxtailManualController implements ManualController {
     if (!this.sprite) {
       return;
     }
-    const length = foxtailLength(vp, FOXTAIL_LENGTH_FRAC);
+    // [UR4-2] ユーザー指定サイズ倍率を L に乗じる（この 1 点のみ。retractShift/tip/base は L 派生で自動追従）。
+    const length = foxtailLength(vp, FOXTAIL_LENGTH_FRAC) * (this.deps.sizeMultiplier ?? 1);
     // スケール: 基部pivot(0.02)から穂先(1.0)までの表示長を L に合わせる（大きく表示）。
     const scale = length / ((1 - BASE_ANCHOR_X) * this.deps.handTexture.width);
     // [M-1] retract の押し出しは L に比例させる（固定量だと穂先が (L−押し出し) px 画面内へ貫入して

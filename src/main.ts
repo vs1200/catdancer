@@ -43,6 +43,7 @@ import { getCritterImage } from "./settings/imageStore";
 import { DEFAULT_MANUAL_TYPE_ID } from "./settings/manualTargets";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
+import { AUTO_OBJECT_SCALE_KEYS, MANUAL_OBJECT_SCALE_KEYS } from "./settings/settingsData";
 import { showBootstrapFailure } from "./ui/BootstrapFallback";
 import { toggleAppFullscreen } from "./ui/fullscreen";
 import { isEditableEventTarget, keyToShortcutAction } from "./ui/keyboardShortcuts";
@@ -144,6 +145,10 @@ async function bootstrap(): Promise<void> {
   // （カーソル追従＝プレースホルダ）へマップする。テクスチャは既ロード済みの共有物を種別ごとに渡す。
   // UR-5（ねこじゃらしのフリック）/ UR-6（虫のクリック出現）は、対応する typeId のエントリを専用
   // コントローラの factory に差し替えれば固有 manual 挙動へ置き換わる（他種別・ManualMode 本体は不変）。
+  // [UR4-2] マウス操作モードの種別ごとの表示サイズ倍率（種別 id → 倍率）。各 manual factory が
+  // closure でこの最新値を読み、spawn 時に sizeMultiplier として渡す（UR4-1 の viewport sizeScale の上へ乗せる）。
+  // subscribe が永続値の変更で更新し、変わったキーが現在操作中の種別なら rebuildCurrent() で実行中の 1 体へ即反映する。
+  let manualObjectScales = settings.settings.manualObjectScales;
   const makeFollowFactory =
     (typeId: string, body: Texture, tail?: Texture): ManualControllerFactory =>
     () =>
@@ -154,6 +159,7 @@ async function bootstrap(): Promise<void> {
         audio,
         pointer: pointerInput,
         scene,
+        sizeMultiplier: manualObjectScales[typeId],
       });
   // [UR3-10] ユーザー任意画像クリッター（単一スロット・種別 id=custom）の動的状態。
   // custom は **マウス操作モード専用**（動画モードには出さない）。下の custom manual factory closure が
@@ -179,6 +185,7 @@ async function bootstrap(): Promise<void> {
           handTexture: foxtailHandTexture,
           pointer: pointerInput,
           scene,
+          sizeMultiplier: manualObjectScales[FOXTAIL_TYPE_ID],
         }),
     ],
     [TOYS_TYPE_ID, makeFollowFactory(TOYS_TYPE_ID, toysTexture)],
@@ -198,11 +205,13 @@ async function bootstrap(): Promise<void> {
               audio,
               pointer: pointerInput,
               scene,
+              sizeMultiplier: manualObjectScales[INSECT_TYPE_ID],
             })
           : new InsectManualController({
               bodyTexture: insectTexture,
               audio,
               scene,
+              sizeMultiplier: manualObjectScales[INSECT_TYPE_ID],
             }),
     ],
     // [UR3-10] 任意画像（マウス操作モード専用）。ロード済み（テクスチャあり＋型登録済）なら
@@ -221,6 +230,7 @@ async function bootstrap(): Promise<void> {
             audio,
             pointer: pointerInput,
             scene,
+            sizeMultiplier: manualObjectScales[CUSTOM_CRITTER_TYPE_ID],
           });
         }
         return new InertManualController();
@@ -251,6 +261,9 @@ async function bootstrap(): Promise<void> {
   // （manual 既定 1.0＝従来同一 / auto 既定 1.8＝底上げ）。適用点は各 mode の setSpeedScale のみ（movement 不変）。
   autoMode.setSpeedScale(settings.settings.autoSpeedScale);
   manualMode.setSpeedScale(settings.settings.manualSpeedScale);
+  // [UR4-2] 種別ごとの表示サイズ倍率を初期反映（reload 復元）。auto は autoMode が保持するので明示反映する。
+  // manual は各 factory が manualObjectScales closure から読むため setter 不要（switchTo→start が最新倍率で spawn）。
+  autoMode.setSizeMultipliers(settings.settings.autoObjectScales);
 
   // --- ユーザー任意画像クリッター（単一スロット・マウス操作モード専用）の動的ロード/破棄 ---
   // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Image.decode →
@@ -474,6 +487,8 @@ async function bootstrap(): Promise<void> {
   let prevHideCursor = settings.settings.hideCursor;
   let prevManualSpeedScale = settings.settings.manualSpeedScale;
   let prevAutoSpeedScale = settings.settings.autoSpeedScale;
+  // [UR4-2] auto の種別サイズ倍率の差分判定用（manual 側は manualObjectScales closure が prev を兼ねる）。
+  let prevAutoObjectScales = settings.settings.autoObjectScales;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join("\u0000");
   // 背景も他フィールドと同型の差分ガードで反映する。無条件 apply だと画像背景時に音量/出現間隔スライダの
@@ -528,6 +543,35 @@ async function bootstrap(): Promise<void> {
     if (next.autoSpeedScale !== prevAutoSpeedScale) {
       prevAutoSpeedScale = next.autoSpeedScale;
       autoMode.setSpeedScale(next.autoSpeedScale);
+    }
+    // [UR4-2] 種別ごとの表示サイズ倍率を mode 別に反映する（速度倍率と同じく現行がどちらでも各 mode が保持）。
+    // auto: 変化があれば autoMode へ live-apply（以後 spawn される該当種別のサイズへ効く）。
+    let autoScaleChanged = false;
+    for (const key of AUTO_OBJECT_SCALE_KEYS) {
+      if (next.autoObjectScales[key] !== prevAutoObjectScales[key]) {
+        autoScaleChanged = true;
+        break;
+      }
+    }
+    if (autoScaleChanged) {
+      prevAutoObjectScales = next.autoObjectScales;
+      autoMode.setSizeMultipliers(next.autoObjectScales);
+    }
+    // manual: closure を最新化し、変わったキーが現在操作中の種別なら実行中の 1 体を rebuildCurrent() で
+    // 作り直して即反映する（manual は同時 1 体＝despawn+respawn。パネル開＝pause 中操作で中央リセットは許容）。
+    // 種別の切替自体は下の setManualType が別途担う（各 setter は 1 フィールドのみ変えるので二重 rebuild は起きない）。
+    let manualScaleChangedForCurrent = false;
+    for (const key of MANUAL_OBJECT_SCALE_KEYS) {
+      if (
+        next.manualObjectScales[key] !== manualObjectScales[key] &&
+        key === manualMode.currentType
+      ) {
+        manualScaleChangedForCurrent = true;
+      }
+    }
+    manualObjectScales = next.manualObjectScales;
+    if (manualScaleChangedForCurrent) {
+      manualMode.rebuildCurrent();
     }
     if (next.mode !== prevMode) {
       prevMode = next.mode;

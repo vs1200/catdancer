@@ -21,6 +21,12 @@ export interface InsectManualControllerDeps {
   scene: Scene;
   /** 乱数源（テスト差し替え用。既定 Math.random）。 */
   rng?: () => number;
+  /**
+   * [UR4-2] 虫のユーザー指定表示サイズ倍率（UR4-1 の viewport sizeScale の上へ乗せる純増倍率）。
+   * 省略/undefined は 1（従来サイズ）。spawnAt の spawn へ渡す。倍率変更は main が rebuildCurrent() で
+   * 新 deps の factory から作り直して反映する（既存の虫は次の spawn まで従来サイズ）。
+   */
+  sizeMultiplier?: number;
 }
 
 /**
@@ -185,6 +191,8 @@ export class InsectManualController implements ManualController {
       },
       // [UR4-1] 現在の viewport を渡して baseSize を解像度非依存にスケールする。
       viewport: this.deps.scene.worldBounds.viewport,
+      // [UR4-2] 虫のユーザー指定サイズ倍率を viewport sizeScale の上へ乗せる（未設定は 1）。
+      sizeMultiplier: this.deps.sizeMultiplier,
     });
   }
 

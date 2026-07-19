@@ -288,6 +288,13 @@ export interface SpawnCritterParams {
    * 省略時は等倍（後方互換＝既存/テストの spawnCritter 呼び出しは挙動不変）。
    */
   viewport?: Viewport;
+  /**
+   * [UR4-2] ユーザー指定の表示サイズ倍率（種別×モード個別）。UR4-1 の viewport sizeScale の上へ
+   * さらに乗せる純増倍率で、size = baseSize × sizeScale(viewport) × sizeMultiplier になる。
+   * 省略/undefined は 1（後方互換＝既存/テストの spawnCritter 呼び出しは挙動不変）。state.size に
+   * 載るので表示スケールだけでなく当たり半径(hitRadius)・尻尾表示幅もこの倍率へ追従する。
+   */
+  sizeMultiplier?: number;
 }
 
 /**
@@ -306,9 +313,10 @@ export function spawnCritter(params: SpawnCritterParams): Critter {
   // 自前で viewport 相対に描くため、ここで係数を掛けても二重スケールにならない。
   const scale = params.viewport ? computeSizeScale(params.viewport) : 1;
   const baseSize = params.spawn?.size ?? type.baseSize;
+  // [UR4-2] ユーザー指定倍率を viewport sizeScale の上へ乗せる（省略時 1＝後方互換）。
   const state = createCritterStateFromType(params.typeId, {
     ...params.spawn,
-    size: baseSize * scale,
+    size: baseSize * scale * (params.sizeMultiplier ?? 1),
   });
   const movement = params.movement ?? type.createMovement();
   return new Critter(state, params.bodyTexture, movement, {
