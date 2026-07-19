@@ -28,7 +28,10 @@ export interface TypeAudioDrive {
   present: boolean;
   /** その種別の最大速度(px/秒)。present=false のとき 0。 */
   maxSpeed: number;
-  /** [UR4-4] 代表 x(px)＝最速個体の x。present=false のとき 0（中央扱い）。 */
+  /**
+   * [UR4-4] 代表 x(px)＝最速個体の x。present=false のときは 0 を置くが、この値は使われない
+   * （呼び出し側は present=false なら pan を無視して無音化するため、x=0 の pan 定位は起きない）。
+   */
   x: number;
 }
 
@@ -54,7 +57,8 @@ export function groupMaxSpeedByType(
 
 /**
  * グループ集計から特定 typeId の駆動値を得る。
- * 出現していない種別は present=false, maxSpeed=0, x=0（＝その種別のSEは鳴らさない・pan は中央）。
+ * 出現していない種別は present=false, maxSpeed=0, x=0（＝その種別のSEは鳴らさない）。
+ * present=false のとき x は使われない（呼び出し側が pan を無視して無音化するため値は無意味）。
  */
 export function driveForType(
   maxByType: ReadonlyMap<string, TypeAudioGroup>,

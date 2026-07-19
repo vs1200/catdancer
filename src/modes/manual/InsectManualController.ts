@@ -28,6 +28,12 @@ export interface InsectManualControllerDeps {
    * 新 deps の factory から作り直して反映する（既存の虫は次の spawn まで従来サイズ）。
    */
   sizeMultiplier?: number;
+  /**
+   * [UR4-3] 虫の効果音（羽音）が有効かをライブに返す closure（省略時は常に true）。update が毎回呼んで
+   * 最新値を読むため、SE トグルは respawn なしで即反映される。false の間は羽音ループを present=false 相当で
+   * 無音化する（虫は voice/捕獲 one-shot 経路が無いため、この 1 本の gate だけで虫のSEを完全に止められる）。
+   */
+  isSoundEnabled?: () => boolean;
 }
 
 /**
@@ -67,12 +73,19 @@ export class InsectManualController implements ManualController {
    * cap/evict（{@link MAX_ACTIVE}）は Insect 固有なので Population.list の最古を見て despawn する。
    */
   private readonly population: CritterPopulation;
+  /**
+   * [UR4-3] 虫の羽音が有効かをライブに読む closure（deps.isSoundEnabled ?? 常に true）。update が毎回
+   * 呼んで最新値を反映するため、SE トグルは respawn なしで即効く。
+   */
+  private readonly isSoundEnabled: () => boolean;
   private running = false;
   private paused = false;
 
   constructor(deps: InsectManualControllerDeps) {
     this.deps = deps;
     this.rng = deps.rng ?? Math.random;
+    // [UR4-3] SE トグルをライブに読む（未指定は常に有効＝従来挙動）。
+    this.isSoundEnabled = deps.isSoundEnabled ?? (() => true);
     // speedScale=1 で明示初期化（update は world のみ上書きし speedScale は保持＝虫の動きの速さ倍率）。
     this.ctx = { world: deps.scene.worldBounds, pointer: null, speedScale: 1 };
     const type = getCritterType(INSECT_TYPE_ID);
@@ -152,7 +165,10 @@ export class InsectManualController implements ManualController {
       }
     }
     const pan = panFromX(fastestX, scene.worldBounds.viewport.width);
-    this.audioCtrl.update(maxSpeed, dtSeconds, this.population.count > 0, pan);
+    // [UR4-3] 虫のSEがオフなら present=false 相当で羽音を無音化する（虫が居ても鳴らさない）。
+    // ライブに読むので respawn なしで即反映する（虫は one-shot 経路が無く、この gate で完全に止まる）。
+    const present = this.population.count > 0 && this.isSoundEnabled();
+    this.audioCtrl.update(maxSpeed, dtSeconds, present, pan);
   }
 
   /**

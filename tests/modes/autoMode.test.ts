@@ -662,3 +662,191 @@ describe("AutoMode: 種別サイズ倍率の配線 (UR4-2)", () => {
     expect(captured[0].sizeMultiplier).toBe(1.3);
   });
 });
+
+/**
+ * [UR4-3] AutoMode の種別SEオン/オフ present-gate（Pixi 非依存・createCritter/audio seam）。
+ *
+ * setSoundEnabled で false にした種別は、画面上で動いていても update の per-type 駆動が present=false になり
+ * ループSE（走行音/羽音）が setLevel(0) のまま鳴らず、handleTap の捕獲 one-shot も抑制される（ループ＋one-shot
+ * 両 gate）。他種別は影響を受けず駆動される。present=false→setLevel(0)/voice非発火 は CritterAudioController
+ * の既存不変（critterAudioController.test で固定済み）を利用し、ここでは AutoMode の gate 合成に集中する。
+ */
+
+/** move sound を持ち createAutoSpawn も持つ spawnable 種別（gate 観測用に走行音ループを生成させる）。 */
+function makeSpawnableTypeWithMove(id: string, moveId: string): CritterType {
+  return {
+    ...makeType(id, { move: moveId }),
+    createAutoSpawn: () => ({
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 0 },
+      facing: 1,
+      movement: { update: () => undefined },
+    }),
+  };
+}
+
+/** SE 集計（typeId/velocity/position.x）と handleTap（position/size/flee）と reap（destroyed/hasExpired/update）を満たす fake critter。 */
+function makeSoundCritter(
+  typeId: string,
+  opts?: { vx?: number; x?: number },
+): DelegFakeCritter & {
+  flee: ReturnType<typeof vi.fn<(fromX: number, fromY: number) => void>>;
+} {
+  return {
+    state: {
+      position: { x: opts?.x ?? 400, y: 300 },
+      size: 100,
+      typeId,
+      velocity: { x: opts?.vx ?? 1000, y: 0 },
+    },
+    destroyed: false,
+    hasExpired: false,
+    update: vi.fn<(dt: number, ctx: unknown) => void>(),
+    flee: vi.fn<(fromX: number, fromY: number) => void>(),
+  };
+}
+
+describe("AutoMode: 種別SEオン/オフの present-gate (UR4-3)", () => {
+  const SND = "ur43-runner";
+  const MOVE_ID = "ur43-move";
+
+  beforeEach(() => {
+    registerCritterType(makeSpawnableTypeWithMove(SND, MOVE_ID));
+  });
+
+  afterEach(() => {
+    clearCritterTypes();
+  });
+
+  /** SND を 1 体 load 済みの running な AutoMode（createCritter seam で fake を注入）。 */
+  function startedMovingMode(
+    audio: AudioSink,
+    critter: ReturnType<typeof makeSoundCritter>,
+    soundEnabled?: Record<string, boolean>,
+  ): AutoMode {
+    let injected = false;
+    const mode = new AutoMode({
+      scene: makeFakeScene(),
+      entries: [entry(SND)],
+      audio,
+      intervalMs: 100000, // update 中にスケジュール spawn が起きない十分大きい間隔。
+      rng: () => 0,
+      createCritter: () => {
+        injected = true;
+        return critter as unknown as Critter;
+      },
+    });
+    if (soundEnabled) {
+      mode.setSoundEnabled(soundEnabled);
+    }
+    mode.start(); // spawnOne → SND を 1 体 load。
+    expect(injected).toBe(true);
+    return mode;
+  }
+
+  it("SEオンの種別は present=true で走行音ループが駆動される（level>0）", () => {
+    const audio = makeFakeAudio();
+    const mode = startedMovingMode(audio.sink, makeSoundCritter(SND), { [SND]: true });
+    const voice = audio.voices[0];
+    voice.setLevel.mockClear();
+    mode.update(1 / 60);
+    // 動いている＋SEオン → present=true でスピード連動レベル(>0)が設定される。
+    expect(voice.setLevel.mock.calls.some(([l]) => l > 0)).toBe(true);
+    mode.stop();
+  });
+
+  it("SEオフの種別は動いていても present=false でループを無音化（setLevel(0) のまま）", () => {
+    const audio = makeFakeAudio();
+    const mode = startedMovingMode(audio.sink, makeSoundCritter(SND), { [SND]: false });
+    const voice = audio.voices[0];
+    voice.setLevel.mockClear();
+    mode.update(1 / 60);
+    // SEオフ → present=false 経路で setLevel(0) のみ、level>0 は一度も無い。
+    expect(voice.setLevel.mock.calls.every(([l]) => l === 0)).toBe(true);
+    mode.stop();
+  });
+
+  it("setSoundEnabled は live-apply（オン→オフ→オンでループ駆動が即切り替わる）", () => {
+    const audio = makeFakeAudio();
+    const mode = startedMovingMode(audio.sink, makeSoundCritter(SND), { [SND]: true });
+    const voice = audio.voices[0];
+
+    voice.setLevel.mockClear();
+    mode.update(1 / 60);
+    expect(voice.setLevel.mock.calls.some(([l]) => l > 0)).toBe(true);
+
+    // ライブにオフ → 次の update で present=false になり無音化（respawn 不要）。
+    mode.setSoundEnabled({ [SND]: false });
+    voice.setLevel.mockClear();
+    mode.update(1 / 60);
+    expect(voice.setLevel.mock.calls.every(([l]) => l === 0)).toBe(true);
+
+    // ライブにオンへ戻す → 復帰して再び level>0。
+    mode.setSoundEnabled({ [SND]: true });
+    voice.setLevel.mockClear();
+    mode.update(1 / 60);
+    expect(voice.setLevel.mock.calls.some(([l]) => l > 0)).toBe(true);
+    mode.stop();
+  });
+
+  it("SEオフの種別は handleTap の捕獲 one-shot も抑制する（逃走＝true は維持）", () => {
+    const audio = makeFakeAudio();
+    const critter = makeSoundCritter(SND, { x: 400 });
+    const mode = startedMovingMode(audio.sink, critter, { [SND]: false });
+    // ヒットするタップ（中心 400,300・半径 60）。
+    const hit = mode.handleTap(400, 300);
+    expect(hit).toBe(true); // 視覚フィードバック（逃走）は維持。
+    expect(critter.flee).toHaveBeenCalledTimes(1);
+    // one-shot（CATCH_ID）は鳴らない。
+    expect(audio.playOneShot).not.toHaveBeenCalled();
+    mode.stop();
+  });
+
+  it("SEオンの種別は handleTap の捕獲 one-shot が鳴る（未設定キーも true フォールバック）", () => {
+    const audio = makeFakeAudio();
+    const critter = makeSoundCritter(SND, { x: 400 });
+    // setSoundEnabled を渡さない → 未設定キーは true フォールバック。
+    const mode = startedMovingMode(audio.sink, critter);
+    const hit = mode.handleTap(400, 300);
+    expect(hit).toBe(true);
+    expect(critter.flee).toHaveBeenCalledTimes(1);
+    // voice 無し種別なので CATCH_ID が鳴る。
+    expect(audio.playOneShot).toHaveBeenCalledTimes(1);
+    expect(audio.playOneShot).toHaveBeenCalledWith(CATCH_ID, expect.any(Number));
+    mode.stop();
+  });
+
+  it("あるオブジェクトのSEをオフにしても、他種別のループは鳴り続ける", () => {
+    const OTHER = "ur43-other";
+    const OTHER_MOVE = "ur43-other-move";
+    registerCritterType(makeSpawnableTypeWithMove(OTHER, OTHER_MOVE));
+    const audio = makeFakeAudio();
+    // SND=オフ / OTHER=オン。両種別を 1 体ずつ load して同時駆動する。
+    const queue = [makeSoundCritter(SND), makeSoundCritter(OTHER)];
+    const mode = new AutoMode({
+      scene: makeFakeScene(),
+      entries: [entry(SND), entry(OTHER)],
+      audio: audio.sink,
+      intervalMs: 100000,
+      rng: () => 0, // 先頭(SND)を選ぶが、両方 spawnType で確実に load する。
+      createCritter: () => (queue.shift() ?? makeSoundCritter(SND)) as unknown as Critter,
+    });
+    mode.setSoundEnabled({ [SND]: false, [OTHER]: true });
+    mode.start(); // SND を load。
+    mode.spawnType(OTHER); // OTHER を load。
+    // controller は createLoop 順（SND, OTHER）で 2 本。move id で対応付ける。
+    const sndVoiceIdx = audio.createLoop.mock.calls.findIndex(([id]) => id === MOVE_ID);
+    const otherVoiceIdx = audio.createLoop.mock.calls.findIndex(([id]) => id === OTHER_MOVE);
+    const sndVoice = audio.voices[sndVoiceIdx];
+    const otherVoice = audio.voices[otherVoiceIdx];
+    sndVoice.setLevel.mockClear();
+    otherVoice.setLevel.mockClear();
+
+    mode.update(1 / 60);
+
+    // SND（オフ）は無音、OTHER（オン）は鳴り続ける。
+    expect(sndVoice.setLevel.mock.calls.every(([l]) => l === 0)).toBe(true);
+    expect(otherVoice.setLevel.mock.calls.some(([l]) => l > 0)).toBe(true);
+    mode.stop();
+  });
+});

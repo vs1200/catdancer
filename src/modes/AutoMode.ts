@@ -88,6 +88,12 @@ export class AutoMode implements Mode {
    * 未設定/未登録キーは 1（後方互換＝従来サイズ）。live-apply（setDisabledTypes と同じスタイル）。
    */
   private sizeMultipliers: Record<string, number> = {};
+  /**
+   * [UR4-3] 種別ごとの効果音 ON/OFF（種別 id → true=鳴る / false=ミュート）。未設定キーは true（後方互換）。
+   * update の present 駆動と handleTap の捕獲 one-shot を種別ごとに gate する（ループSE＋one-shot 両方）。
+   * live-apply（setDisabledTypes と同じスタイル。respawn せず次フレームの present 判定へ即反映）。
+   */
+  private soundEnabled: Record<string, boolean> = {};
   /** spawnOne での有効種別マスク済み重みの再利用バッファ（毎回 new しない）。 */
   private readonly spawnWeightsBuf: number[] = [];
   private running = false;
@@ -203,6 +209,16 @@ export class AutoMode implements Mode {
   }
 
   /**
+   * [UR4-3] 種別ごとの効果音 ON/OFF を設定する（実行中でも即反映＝live-apply）。update の per-type
+   * present 駆動（ループSE＋自動チュー）と handleTap の捕獲 one-shot を種別ごとに gate する。false の
+   * 種別は present=false 相当で無音化され、捕獲SEも鳴らない。外部レコードを共有しないよう浅コピーして
+   * 保持する（setDisabledTypes/setSizeMultipliers と同流儀）。未設定キーは true フォールバック。
+   */
+  setSoundEnabled(map: Record<string, boolean>): void {
+    this.soundEnabled = { ...map };
+  }
+
+  /**
    * 出現対象の種別エントリを動的に追加する（実行中でも即反映）。
    * 同一 typeId が既にあれば置換する（bodyTexture/weight を差し替え、重複出現を防ぐ）。
    * entries と weights は常に同じ index 対応を保つ（weightedIndex が破綻しないため）。
@@ -265,7 +281,10 @@ export class AutoMode implements Mode {
     const vpWidth = scene.worldBounds.viewport.width;
     for (const [typeId, ctrl] of this.audioCtrls) {
       const drive = driveForType(maxByType, typeId);
-      ctrl.update(drive.maxSpeed, dtSeconds, drive.present, panFromX(drive.x, vpWidth));
+      // [UR4-3] 種別SEがオフなら present=false で駆動し、走行音/羽音のループも自動チューも無音化する
+      // （在否ゲートに mute を合成。CritterAudioController が present=false で move gain=0＋voice 非発火）。
+      const present = drive.present && (this.soundEnabled[typeId] ?? true);
+      ctrl.update(drive.maxSpeed, dtSeconds, present, panFromX(drive.x, vpWidth));
     }
   }
 
@@ -290,9 +309,13 @@ export class AutoMode implements Mode {
     best.flee(worldX, worldY);
     // 反応SE: 種別に voice があればそれ、無ければ汎用キャッチSE。
     // [UR4-4] 捕獲した critter の x 位置で発火時に左右定位する（画面左の critter は左から鳴る）。
-    const voice = getCritterType(best.state.typeId).sounds.voice;
-    const pan = panFromX(best.state.position.x, this.deps.scene.worldBounds.viewport.width);
-    this.deps.audio.playOneShot(voice ?? CATCH_ID, pan);
+    // [UR4-3] 種別SEがオフなら捕獲 one-shot も鳴らさない（逃走＝視覚フィードバックは維持し true を返す。
+    // ループSE と one-shot の両方を gate してその種別のSEを完全に止める）。
+    if (this.soundEnabled[best.state.typeId] ?? true) {
+      const voice = getCritterType(best.state.typeId).sounds.voice;
+      const pan = panFromX(best.state.position.x, this.deps.scene.worldBounds.viewport.width);
+      this.deps.audio.playOneShot(voice ?? CATCH_ID, pan);
+    }
     return true;
   }
 

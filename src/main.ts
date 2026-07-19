@@ -43,7 +43,11 @@ import { getCritterImage } from "./settings/imageStore";
 import { DEFAULT_MANUAL_TYPE_ID } from "./settings/manualTargets";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
-import { AUTO_OBJECT_SCALE_KEYS, MANUAL_OBJECT_SCALE_KEYS } from "./settings/settingsData";
+import {
+  AUTO_OBJECT_SCALE_KEYS,
+  MANUAL_OBJECT_SCALE_KEYS,
+  SOUND_TOGGLE_KEYS,
+} from "./settings/settingsData";
 import { showBootstrapFailure } from "./ui/BootstrapFallback";
 import { toggleAppFullscreen } from "./ui/fullscreen";
 import { isEditableEventTarget, keyToShortcutAction } from "./ui/keyboardShortcuts";
@@ -149,6 +153,10 @@ async function bootstrap(): Promise<void> {
   // closure でこの最新値を読み、spawn 時に sizeMultiplier として渡す（UR4-1 の viewport sizeScale の上へ乗せる）。
   // subscribe が永続値の変更で更新し、変わったキーが現在操作中の種別なら rebuildCurrent() で実行中の 1 体へ即反映する。
   let manualObjectScales = settings.settings.manualObjectScales;
+  // [UR4-3] 種別ごとの効果音 ON/OFF（種別 id → boolean）。各 manual factory が closure でこの最新値を
+  // ライブ参照し（isSoundEnabled）、update/onPointerDown が毎フレーム読むため SE トグルは respawn なしで
+  // 即反映される。subscribe が永続値の変更でこの変数と autoMode.setSoundEnabled を更新する。
+  let objectSoundEnabled = settings.settings.objectSoundEnabled;
   const makeFollowFactory =
     (typeId: string, body: Texture, tail?: Texture): ManualControllerFactory =>
     () =>
@@ -160,6 +168,7 @@ async function bootstrap(): Promise<void> {
         pointer: pointerInput,
         scene,
         sizeMultiplier: manualObjectScales[typeId],
+        isSoundEnabled: () => objectSoundEnabled[typeId] ?? true,
       });
   // [UR3-10] ユーザー任意画像クリッター（単一スロット・種別 id=custom）の動的状態。
   // custom は **マウス操作モード専用**（動画モードには出さない）。下の custom manual factory closure が
@@ -206,12 +215,14 @@ async function bootstrap(): Promise<void> {
               pointer: pointerInput,
               scene,
               sizeMultiplier: manualObjectScales[INSECT_TYPE_ID],
+              isSoundEnabled: () => objectSoundEnabled[INSECT_TYPE_ID] ?? true,
             })
           : new InsectManualController({
               bodyTexture: insectTexture,
               audio,
               scene,
               sizeMultiplier: manualObjectScales[INSECT_TYPE_ID],
+              isSoundEnabled: () => objectSoundEnabled[INSECT_TYPE_ID] ?? true,
             }),
     ],
     // [UR3-10] 任意画像（マウス操作モード専用）。ロード済み（テクスチャあり＋型登録済）なら
@@ -231,6 +242,7 @@ async function bootstrap(): Promise<void> {
             pointer: pointerInput,
             scene,
             sizeMultiplier: manualObjectScales[CUSTOM_CRITTER_TYPE_ID],
+            isSoundEnabled: () => objectSoundEnabled[CUSTOM_CRITTER_TYPE_ID] ?? true,
           });
         }
         return new InertManualController();
@@ -264,6 +276,9 @@ async function bootstrap(): Promise<void> {
   // [UR4-2] 種別ごとの表示サイズ倍率を初期反映（reload 復元）。auto は autoMode が保持するので明示反映する。
   // manual は各 factory が manualObjectScales closure から読むため setter 不要（switchTo→start が最新倍率で spawn）。
   autoMode.setSizeMultipliers(settings.settings.autoObjectScales);
+  // [UR4-3] 種別ごとの効果音 ON/OFF を初期反映（reload 復元）。auto は autoMode が保持する（present-gate へ
+  // live-apply）。manual は各コントローラが objectSoundEnabled closure をライブ参照するため setter 不要。
+  autoMode.setSoundEnabled(settings.settings.objectSoundEnabled);
 
   // --- ユーザー任意画像クリッター（単一スロット・マウス操作モード専用）の動的ロード/破棄 ---
   // 設定 customCritterImageId → IDB(critterImages) の Blob → objectURL → Image.decode →
@@ -489,6 +504,8 @@ async function bootstrap(): Promise<void> {
   let prevAutoSpeedScale = settings.settings.autoSpeedScale;
   // [UR4-2] auto の種別サイズ倍率の差分判定用（manual 側は manualObjectScales closure が prev を兼ねる）。
   let prevAutoObjectScales = settings.settings.autoObjectScales;
+  // [UR4-3] 効果音 ON/OFF の差分判定用（auto/manual 共通の単一レコード。前回値と per-key 比較する）。
+  let prevObjectSoundEnabled = settings.settings.objectSoundEnabled;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
   let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join("\u0000");
   // 背景も他フィールドと同型の差分ガードで反映する。無条件 apply だと画像背景時に音量/出現間隔スライダの
@@ -572,6 +589,21 @@ async function bootstrap(): Promise<void> {
     manualObjectScales = next.manualObjectScales;
     if (manualScaleChangedForCurrent) {
       manualMode.rebuildCurrent();
+    }
+    // [UR4-3] 効果音 ON/OFF を反映する（auto/manual 共通の単一フラグ）。変化があれば closure を最新化し
+    // （manual コントローラは次フレームの update/onPointerDown でライブに拾う＝respawn 不要）、auto へ
+    // live-apply する（present-gate へ即反映）。size と違い present は毎フレーム判定なので rebuild しない。
+    let soundEnabledChanged = false;
+    for (const key of SOUND_TOGGLE_KEYS) {
+      if (next.objectSoundEnabled[key] !== prevObjectSoundEnabled[key]) {
+        soundEnabledChanged = true;
+        break;
+      }
+    }
+    if (soundEnabledChanged) {
+      prevObjectSoundEnabled = next.objectSoundEnabled;
+      objectSoundEnabled = next.objectSoundEnabled;
+      autoMode.setSoundEnabled(next.objectSoundEnabled);
     }
     if (next.mode !== prevMode) {
       prevMode = next.mode;

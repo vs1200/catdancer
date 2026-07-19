@@ -97,7 +97,7 @@ function makeFakePointer() {
   return { pointer, state };
 }
 
-function buildController(typeId: string) {
+function buildController(typeId: string, isSoundEnabled?: () => boolean) {
   const sink = makeFakeSink();
   const { pointer, state } = makeFakePointer();
   const controller = new FollowManualController({
@@ -107,6 +107,7 @@ function buildController(typeId: string) {
     audio: sink.sink,
     pointer,
     scene: makeFakeScene(),
+    isSoundEnabled,
   });
   return { controller, sink, pointerState: state };
 }
@@ -246,6 +247,115 @@ describe("FollowManualController の走行音 左右定位（UR4-4）", () => {
       expect(left.sink.pans.some((p) => p < 0)).toBe(true);
       expect(left.sink.pans.some((p) => p > 0)).toBe(false);
       left.controller.stop();
+    } finally {
+      unregisterCritterType(RUNNER_ID);
+    }
+  });
+});
+
+/**
+ * [UR4-3] FollowManualController の効果音オン/オフ（ライブ closure gate）。
+ *
+ * isSoundEnabled closure が false を返す間は、追従中の自動SE（走行音 move ループ）も onPointerDown の
+ * クリック鳴き（voice one-shot）も駆動しない（ループ＋one-shot 両 gate）。closure をライブに読むため、
+ * respawn せず値の変化が次フレームの update / 次のクリックへ即反映される。mouse は UR4-5 で元々自動音を
+ * 抑制するが、SEオフにすると **クリック鳴き squeak も止まる**（UR4-5 と整合＝mouse ミュートで完全無音）。
+ */
+describe("FollowManualController の効果音オン/オフ (UR4-3)", () => {
+  it("mouse: SEオフだとクリック鳴き(squeak)も鳴らない（UR4-5 と整合＝mouse ミュートで完全無音）", () => {
+    if (!hasCritterType("mouse")) {
+      registerMouseType();
+    }
+    let enabled = true;
+    const { controller, sink, pointerState } = buildController("mouse", () => enabled);
+    controller.start();
+    pointerState.value = { x: VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+    for (let i = 0; i < 30; i++) {
+      controller.update(1 / 60);
+    }
+    // SEオンの間はクリックで squeak が鳴る（UR4-5 でも onPointerDown のクリック鳴きは維持）。
+    controller.onPointerDown(10, 20);
+    expect(sink.fired).toEqual([MOUSE_SQUEAK_ID]);
+
+    // ライブにSEオフ → クリックしても鳴らない（respawn 不要で即反映）。走行音ループも 0 のまま。
+    enabled = false;
+    sink.fired.length = 0;
+    for (let i = 0; i < 5; i++) {
+      controller.update(1 / 60);
+    }
+    controller.onPointerDown(10, 20);
+    expect(sink.fired).toHaveLength(0);
+    expect(sink.levels.every((l) => l === 0)).toBe(true);
+
+    // 再びオンでクリック鳴きが復帰する。
+    enabled = true;
+    controller.onPointerDown(10, 20);
+    expect(sink.fired).toEqual([MOUSE_SQUEAK_ID]);
+    controller.stop();
+  });
+
+  it("フラグ無し種別: SEオフだと追従中の走行音(move ループ)も駆動しない（ライブに復帰）", () => {
+    const RUNNER_ID = "ur43-follow-runner";
+    const runnerType: CritterType = {
+      id: RUNNER_ID,
+      displayName: "SEトグルテスト走者",
+      textureUrl: "",
+      baseSize: 100,
+      defaultFacing: 1,
+      faceMode: "flip",
+      createMovement: () => new MouseFollowMovement(),
+      sounds: { move: "ur43-follow-move" },
+      hasTail: false,
+    };
+    registerCritterType(runnerType);
+    try {
+      let enabled = false;
+      const { controller, sink, pointerState } = buildController(RUNNER_ID, () => enabled);
+      controller.start();
+      // SEオフの間は、追従で動いていても走行音レベルが 0 のまま（present=false 相当）。
+      pointerState.value = { x: VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+      for (let i = 0; i < 10; i++) {
+        controller.update(1 / 60);
+      }
+      expect(sink.levels.every((l) => l === 0)).toBe(true);
+
+      // ライブにオン → 反対側の遠方へポインタを移して再加速させ、走行音レベルが 0 超になる（respawn 不要）。
+      enabled = true;
+      pointerState.value = { x: -VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+      for (let i = 0; i < 10; i++) {
+        controller.update(1 / 60);
+      }
+      expect(sink.levels.some((l) => l > 0)).toBe(true);
+      controller.stop();
+    } finally {
+      unregisterCritterType(RUNNER_ID);
+    }
+  });
+
+  it("isSoundEnabled 未指定は常に有効（従来挙動＝後方互換）", () => {
+    const RUNNER_ID = "ur43-default-runner";
+    const runnerType: CritterType = {
+      id: RUNNER_ID,
+      displayName: "既定走者",
+      textureUrl: "",
+      baseSize: 100,
+      defaultFacing: 1,
+      faceMode: "flip",
+      createMovement: () => new MouseFollowMovement(),
+      sounds: { move: "ur43-default-move" },
+      hasTail: false,
+    };
+    registerCritterType(runnerType);
+    try {
+      // isSoundEnabled を渡さない → 常に有効。
+      const { controller, sink, pointerState } = buildController(RUNNER_ID);
+      controller.start();
+      pointerState.value = { x: VIEWPORT.width * 8, y: VIEWPORT.height * 8 };
+      for (let i = 0; i < 20; i++) {
+        controller.update(1 / 60);
+      }
+      expect(sink.levels.some((l) => l > 0)).toBe(true);
+      controller.stop();
     } finally {
       unregisterCritterType(RUNNER_ID);
     }

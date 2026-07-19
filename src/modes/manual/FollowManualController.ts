@@ -31,6 +31,12 @@ export interface FollowManualControllerDeps {
    * main が rebuildCurrent()（＝新 deps の factory で作り直し）で反映する。
    */
   sizeMultiplier?: number;
+  /**
+   * [UR4-3] この種別の効果音が有効かをライブに返す closure（省略時は常に true）。update と onPointerDown が
+   * 毎回呼んで最新値を読むため、トグルは respawn なしで即反映される（size と違い present は毎フレーム判定）。
+   * false の間は追従中の自動SE（走行音/自動チュー）もクリック鳴きも駆動しない（ループ＋one-shot 両 gate）。
+   */
+  isSoundEnabled?: () => boolean;
 }
 
 /**
@@ -65,6 +71,11 @@ export class FollowManualController implements ManualController {
    * 省略/false の種別は true＝従来どおり追従速度に連動して自動音を鳴らす。
    */
   private readonly drivesAutoAudio: boolean;
+  /**
+   * [UR4-3] この種別の効果音が有効かをライブに読む closure（deps.isSoundEnabled ?? 常に true）。
+   * update/onPointerDown が毎回呼んで最新値を反映するため、SE トグルは respawn なしで即効く。
+   */
+  private readonly isSoundEnabled: () => boolean;
   private critter: Critter | null = null;
   private running = false;
   private paused = false;
@@ -89,6 +100,8 @@ export class FollowManualController implements ManualController {
     this.clickWiggle = type.clickWiggle ?? null;
     // [UR4-5] mouse は追従中の自動SE(走行音/自動チュー)を鳴らさない（クリック鳴きのみ）。他種別は従来どおり。
     this.drivesAutoAudio = !(type.manualFollowMuteAutoSound ?? false);
+    // [UR4-3] SE トグルをライブに読む（未指定は常に有効＝従来挙動）。
+    this.isSoundEnabled = deps.isSoundEnabled ?? (() => true);
   }
 
   start(): void {
@@ -191,7 +204,9 @@ export class FollowManualController implements ManualController {
     // 1 体で常に存在するため通常は present=true。[UR4-5] manualFollowMuteAutoSound 種別(mouse)は
     // present=false を渡し、自動SE(走行音 move ループの gain=0 固定＋voice スケジューラの自動チュー)を
     // 一切駆動しない（鳴き声は onPointerDown のクリック時のみ）。present=false 経路は pan を無視する。
-    this.audioCtrl.update(speed, dtSeconds, this.drivesAutoAudio, pan);
+    // [UR4-3] この種別のSEがオフなら present=false 相当で無音化する（走行音/自動チューを止める＝ループ gate）。
+    // ライブに読むので respawn なしで即反映する（UR4-5 の drivesAutoAudio と合成＝どちらかが false なら無音）。
+    this.audioCtrl.update(speed, dtSeconds, this.drivesAutoAudio && this.isSoundEnabled(), pan);
   }
 
   /**
@@ -204,7 +219,9 @@ export class FollowManualController implements ManualController {
    */
   onPointerDown(_worldX: number, _worldY: number): void {
     const voice = getCritterType(this.deps.typeId).sounds.voice;
-    if (voice) {
+    // [UR4-3] この種別のSEがオフなら鳴き声(one-shot)を鳴らさない（mouse をオフにするとクリック鳴き squeak も
+    // 止まる＝UR4-5 と整合。ループ gate と合わせて one-shot も gate し、その種別のSEを完全に止める）。
+    if (voice && this.isSoundEnabled()) {
       // [UR4-4] クリック鳴きも現在の critter の x 位置で左右定位する（左を追従中は左から鳴く）。
       const pan = this.critter
         ? panFromX(this.critter.state.position.x, this.deps.scene.worldBounds.viewport.width)
