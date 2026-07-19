@@ -66,6 +66,23 @@ export function scurryLevelFromSpeed(
   return clamp01((speed - minSpeed) / (maxSpeed - minSpeed));
 }
 
+/**
+ * 発音元 x(px) と viewport 幅から左右パン(-1..1)を求める純写像（[UR4-4] SEの左右定位）。
+ * 中央 0 / 左端 -1 / 右端 +1。範囲外は端へクランプする。
+ * 異常入力（幅<=0 / x が非有限[NaN/Inf]）は 0（中央）にフォールバックし、決して throw しない
+ * （gain の暴走を防ぐ clamp01 と同じ堅牢流儀）。
+ */
+export function panFromX(x: number, viewportWidth: number): number {
+  if (!(viewportWidth > 0)) {
+    return 0;
+  }
+  if (!Number.isFinite(x)) {
+    return 0;
+  }
+  const pan = (x / viewportWidth) * 2 - 1;
+  return pan < -1 ? -1 : pan > 1 ? 1 : pan;
+}
+
 /** オシレータ波形（squeak 用）。 */
 export type OscillatorWaveform = "sine" | "triangle" | "sawtooth" | "square";
 

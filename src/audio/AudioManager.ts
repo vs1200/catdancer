@@ -81,6 +81,13 @@ export class AudioManager implements AudioSink {
   private readonly analyser: AnalyserNode | null;
   // 明示的に ArrayBuffer 裏付けで確保（getFloatTimeDomainData の Float32Array<ArrayBuffer> 要求に合わせる）。
   private readonly timeData: Float32Array<ArrayBuffer> | null;
+  // [UR4-4] DEV ステレオ検証タップ: master 出力を ChannelSplitter で L/R に分け、各 analyser で RMS を採る
+  // （左右定位を数値で客観確認する）。既存 master→analyser→destination とは独立の純タップ（gain=0 の
+  // silentSink 経由で destination へ落とすため音は二重に出ない）。context 未生成/生成失敗時は null。
+  private readonly analyserL: AnalyserNode | null;
+  private readonly analyserR: AnalyserNode | null;
+  private readonly timeDataL: Float32Array<ArrayBuffer> | null;
+  private readonly timeDataR: Float32Array<ArrayBuffer> | null;
   private readonly oneShots = new Map<string, OneShotBuilder>();
   private readonly loops = new Map<string, LoopBuilder>();
   // サンプル音源バンク（実録WAVの decode 済み AudioBuffer 集合）。登録があれば同 id の合成ビルダより優先する。
@@ -100,6 +107,10 @@ export class AudioManager implements AudioSink {
     let master: GainNode | null = null;
     let analyser: AnalyserNode | null = null;
     let timeData: Float32Array<ArrayBuffer> | null = null;
+    let analyserL: AnalyserNode | null = null;
+    let analyserR: AnalyserNode | null = null;
+    let timeDataL: Float32Array<ArrayBuffer> | null = null;
+    let timeDataR: Float32Array<ArrayBuffer> | null = null;
     try {
       const Ctor = getAudioContextCtor();
       if (Ctor) {
@@ -107,14 +118,34 @@ export class AudioManager implements AudioSink {
         master = ctx.createGain();
         // ミュート中は初期から 0（映像のみモードで起動時から無音）。音量値そのものは保持する。
         master.gain.value = this.mutedValue ? 0 : this.masterVolumeValue;
+        const fftSize = options?.analyserFftSize ?? DEFAULT_FFT_SIZE;
         analyser = ctx.createAnalyser();
-        analyser.fftSize = options?.analyserFftSize ?? DEFAULT_FFT_SIZE;
-        timeData = new Float32Array(
-          new ArrayBuffer(analyser.fftSize * Float32Array.BYTES_PER_ELEMENT),
-        );
+        analyser.fftSize = fftSize;
+        timeData = new Float32Array(new ArrayBuffer(fftSize * Float32Array.BYTES_PER_ELEMENT));
         // sources → master → analyser → destination（analyser は素通しで master 出力を観測）。
         master.connect(analyser);
         analyser.connect(ctx.destination);
+
+        // [UR4-4] DEV ステレオ検証タップ（既存 master→analyser→destination は不変のまま増設する）。
+        // master → splitter で L/R に分岐し、それぞれ analyserL/analyserR で観測する。両 analyser は
+        // gain=0 の silentSink を介して destination へ落とす（analyser は下流 gain に関わらず入力を観測できる
+        // ので RMS は正しく採れ、かつ音は二重に出ない）。mute/volume は master.gain のままなので、
+        // この分岐にもそのまま反映される（master 以降の分岐なので両タップに同じ実効ゲインが乗る）。
+        const splitter = ctx.createChannelSplitter(2);
+        master.connect(splitter);
+        analyserL = ctx.createAnalyser();
+        analyserL.fftSize = fftSize;
+        analyserR = ctx.createAnalyser();
+        analyserR.fftSize = fftSize;
+        splitter.connect(analyserL, 0);
+        splitter.connect(analyserR, 1);
+        const silentSink = ctx.createGain();
+        silentSink.gain.value = 0;
+        analyserL.connect(silentSink);
+        analyserR.connect(silentSink);
+        silentSink.connect(ctx.destination);
+        timeDataL = new Float32Array(new ArrayBuffer(fftSize * Float32Array.BYTES_PER_ELEMENT));
+        timeDataR = new Float32Array(new ArrayBuffer(fftSize * Float32Array.BYTES_PER_ELEMENT));
       }
     } catch (error) {
       console.warn("AudioContext の生成に失敗しました。音声は無効化されます。", error);
@@ -122,11 +153,19 @@ export class AudioManager implements AudioSink {
       master = null;
       analyser = null;
       timeData = null;
+      analyserL = null;
+      analyserR = null;
+      timeDataL = null;
+      timeDataR = null;
     }
     this.ctx = ctx;
     this.master = master;
     this.analyser = analyser;
     this.timeData = timeData;
+    this.analyserL = analyserL;
+    this.analyserR = analyserR;
+    this.timeDataL = timeDataL;
+    this.timeDataR = timeDataR;
   }
 
   /** context が生成できたか（false なら全 API は安全な no-op）。 */
@@ -502,14 +541,34 @@ export class AudioManager implements AudioSink {
     if (!this.analyser || !this.timeData) {
       return 0;
     }
-    this.analyser.getFloatTimeDomainData(this.timeData);
+    return AudioManager.rmsOf(this.analyser, this.timeData);
+  }
+
+  /** analyser の時間波形を buf へ読み出して RMS(0..1目安)を返す（getRms/getStereoLevels 共通）。 */
+  private static rmsOf(analyser: AnalyserNode, buf: Float32Array<ArrayBuffer>): number {
+    analyser.getFloatTimeDomainData(buf);
     let sum = 0;
-    for (let i = 0; i < this.timeData.length; i++) {
-      const s = this.timeData[i];
+    for (let i = 0; i < buf.length; i++) {
+      const s = buf[i];
       sum += s * s;
     }
-    const rms = Math.sqrt(sum / this.timeData.length);
+    const rms = Math.sqrt(sum / buf.length);
     return Number.isFinite(rms) ? rms : 0;
+  }
+
+  /**
+   * [UR4-4] master 出力の左右チャンネル別 RMS(0..1目安)。DEV ステレオ検証フック用（左右定位を数値で確認する）。
+   * 各 SE は発音元 x に応じて StereoPanner でパンされるので、画面左を走る音は left>right、右は right>left になる。
+   * context 未生成/タップ無しなら {left:0,right:0}（安全既定）。getRms と同じ RMS 計算。
+   */
+  getStereoLevels(): { left: number; right: number } {
+    if (!this.analyserL || !this.analyserR || !this.timeDataL || !this.timeDataR) {
+      return { left: 0, right: 0 };
+    }
+    return {
+      left: AudioManager.rmsOf(this.analyserL, this.timeDataL),
+      right: AudioManager.rmsOf(this.analyserR, this.timeDataR),
+    };
   }
 
   /** master 出力の瞬時 peak(0..1目安)。 */

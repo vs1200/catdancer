@@ -838,6 +838,8 @@ async function bootstrap(): Promise<void> {
       state: () => audio.state,
       rms: () => audio.getRms(),
       peak: () => audio.getPeak(),
+      // [UR4-4] 左右チャンネル別 RMS（SEの左右定位を数値で客観確認する）。
+      stereo: () => audio.getStereoLevels(),
       master: () => audio.masterVolume,
       muted: () => audio.muted,
       squeak: () => audio.playOneShot(MOUSE_SQUEAK_ID),

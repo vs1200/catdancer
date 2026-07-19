@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clamp01,
   makeSqueakParams,
+  panFromX,
   pickRandomIndex,
   SCURRY_LEVEL_DEFAULTS,
   scurryLevelFromSpeed,
@@ -165,5 +166,49 @@ describe("pickRandomIndex", () => {
       seen.add(idx);
     }
     expect(seen.size).toBe(3);
+  });
+});
+
+describe("panFromX", () => {
+  const W = 1000;
+
+  it("中央は 0 / 左端は -1 / 右端は +1", () => {
+    expect(panFromX(W / 2, W)).toBe(0);
+    expect(panFromX(0, W)).toBe(-1);
+    expect(panFromX(W, W)).toBe(1);
+  });
+
+  it("画面内の中間位置は線形に写像する", () => {
+    expect(panFromX(W * 0.25, W)).toBeCloseTo(-0.5, 6);
+    expect(panFromX(W * 0.75, W)).toBeCloseTo(0.5, 6);
+  });
+
+  it("画面外（world margin 領域）の x は端へクランプする", () => {
+    // 負の x（左 margin）や幅超の x（右 margin）でも [-1,1] に収める。
+    expect(panFromX(-500, W)).toBe(-1);
+    expect(panFromX(W * 2, W)).toBe(1);
+  });
+
+  it("x について単調非減少（左ほど小さく右ほど大きい）", () => {
+    let prev = panFromX(-100, W);
+    for (let x = -100; x <= W + 100; x += 50) {
+      const p = panFromX(x, W);
+      expect(p).toBeGreaterThanOrEqual(prev);
+      expect(p).toBeGreaterThanOrEqual(-1);
+      expect(p).toBeLessThanOrEqual(1);
+      prev = p;
+    }
+  });
+
+  it("幅<=0（未初期化 viewport 等）は 0（中央）へフォールバック・非throw", () => {
+    expect(panFromX(300, 0)).toBe(0);
+    expect(panFromX(300, -100)).toBe(0);
+    expect(panFromX(300, Number.NaN)).toBe(0);
+  });
+
+  it("x が非有限（NaN/Inf）でも 0（中央）へフォールバック・非throw", () => {
+    expect(panFromX(Number.NaN, W)).toBe(0);
+    expect(panFromX(Number.POSITIVE_INFINITY, W)).toBe(0);
+    expect(panFromX(Number.NEGATIVE_INFINITY, W)).toBe(0);
   });
 });
