@@ -42,6 +42,8 @@ import { DEFAULT_MANUAL_TYPE_ID } from "./settings/manualTargets";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
 import { showBootstrapFailure } from "./ui/BootstrapFallback";
+import { toggleAppFullscreen } from "./ui/fullscreen";
+import { isEditableEventTarget, keyToShortcutAction } from "./ui/keyboardShortcuts";
 import { OptionsButton } from "./ui/OptionsButton";
 import { OptionsPanel } from "./ui/OptionsPanel";
 import { PlayLimitOverlay } from "./ui/PlayLimitOverlay";
@@ -283,16 +285,20 @@ async function bootstrap(): Promise<void> {
   // 現行モードを一時停止する（合成pause）。背景タブで rAF は止まり描画は自然停止するが、Web Audio の
   // 環境音ループ（走行音/羽音）は鳴り続けてしまうため、hidden 時に明示的に無音化する。
   let tabHidden = false;
+  // キーボードショートカット（Space）による一時停止トグルの現在値。合成pause の第 3 要因。
+  // panelOpen/tabHidden とは独立で、Space トグル中にパネル開閉やタブ非表示を跨いでも論理和で
+  // 自然に維持される（個別 setPaused にしないことで片方の解除時に誤再開しない）。
+  let keyPaused = false;
   // マウスカーソル非表示設定の現在値（起動時に settings から復元。subscribe 差分で更新される）。
   let hideCursor = settings.settings.hideCursor;
 
   /**
-   * 現行モードの一時停止を「パネル開(panelOpen)」または「タブ非表示(tabHidden)」の論理和で統一する
-   * （合成pause）。各要因を個別に setPaused すると、片方の解除時にもう片方を上書き（誤再開）して
-   * しまうため、常に両要因の OR を反映する。currentMode 未確定時は no-op。
+   * 現行モードの一時停止を「パネル開(panelOpen)」「タブ非表示(tabHidden)」「キー一時停止(keyPaused)」
+   * の論理和で統一する（合成pause）。各要因を個別に setPaused すると、1 つの解除時に他要因を上書き
+   * （誤再開）してしまうため、常に全要因の OR を反映する。currentMode 未確定時は no-op。
    */
   const applyPause = (): void => {
-    currentMode?.setPaused(panelOpen || tabHidden);
+    currentMode?.setPaused(panelOpen || tabHidden || keyPaused);
   };
 
   /**
@@ -492,6 +498,41 @@ async function bootstrap(): Promise<void> {
     applyPause();
   };
   document.addEventListener("visibilitychange", onVisibilityChange);
+
+  // デスクトップ向けキーボードショートカット（global keydown を 1 つだけ張る）。
+  // Space=一時停止トグル / f=全画面トグル / m=モード切替。無効化ガード（修飾キー付き・IME 変換中・
+  // パネル開・入力欄フォーカス）は keyToShortcutAction が集約する。成立時のみ preventDefault して
+  // Space の既定スクロール等を止め、非成立キーは何も奪わない。既存 Esc（OptionsPanel のパネル閉）や
+  // AudioManager の resume 契機（keydown 購読）とは干渉しない（stopPropagation しない・Esc は写像外）。
+  // ハンドラは安定参照にして将来の破棄フロー（removeEventListener）に備える。現状 bootstrap に破棄
+  // フローは無く、他リスナ同様 add のみ。
+  const onShortcutKeyDown = (event: KeyboardEvent): void => {
+    const action = keyToShortcutAction(event.key, {
+      hasModifier: event.ctrlKey || event.metaKey || event.altKey,
+      isComposing: event.isComposing,
+      panelOpen,
+      editableTarget: isEditableEventTarget(event.target),
+    });
+    if (!action) {
+      return;
+    }
+    event.preventDefault();
+    switch (action) {
+      case "toggle-pause":
+        // 合成pause の第 3 要因をトグルして反映（panelOpen/tabHidden との論理和は applyPause が維持）。
+        keyPaused = !keyPaused;
+        applyPause();
+        break;
+      case "toggle-fullscreen":
+        void toggleAppFullscreen();
+        break;
+      case "toggle-mode":
+        // 現在と逆モードへ（既存の switchTo を再利用。新規挙動は作らない）。
+        switchTo(currentModeName === "auto" ? "manual" : "auto");
+        break;
+    }
+  };
+  document.addEventListener("keydown", onShortcutKeyDown);
 
   // 開発時のみ: critter 数/モード等を観測する DEV フックを露出する（本番ビルドでは tree-shake）。
   if (import.meta.env.DEV) {
