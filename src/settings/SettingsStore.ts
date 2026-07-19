@@ -5,7 +5,7 @@ import {
   putImage,
 } from "./imageStore";
 import { normalizeManualTypeId } from "./manualTargets";
-import type { AppMode, AppSettings, BackgroundType } from "./settingsData";
+import type { AppMode, AppSettings, BackgroundType, InsectManualPattern } from "./settingsData";
 import {
   clampPlayLimitMinutes,
   clampSpawnInterval,
@@ -15,6 +15,7 @@ import {
   normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeHideCursor,
+  normalizeInsectManualPattern,
   normalizeMode,
   normalizeMuted,
   normalizeSpeedScale,
@@ -61,6 +62,7 @@ export class SettingsStore {
       hideCursor: this.state.hideCursor,
       mode: this.state.mode,
       manualTypeId: this.state.manualTypeId,
+      insectManualPattern: this.state.insectManualPattern,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
       autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
       customCritterImageId: this.state.customCritterImageId,
@@ -198,6 +200,16 @@ export class SettingsStore {
    */
   setManualTypeId(typeId: string): void {
     this.state.manualTypeId = normalizeManualTypeId(typeId);
+    this.commit();
+  }
+
+  /**
+   * [UR3-5] 操作対象=虫の動きパターンを設定する（click=クリックで出現 / follow=マウス追従。永続化＋通知）。
+   * 許可集合外/異常型は既定 click へ正規化する。main の購読が現在虫を操作中なら虫コントローラを作り直す
+   * （InsectManualController↔FollowManualController(insect) を差し替え、既存虫を残さない）。
+   */
+  setInsectManualPattern(pattern: InsectManualPattern): void {
+    this.state.insectManualPattern = normalizeInsectManualPattern(pattern);
     this.commit();
   }
 

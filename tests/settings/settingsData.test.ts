@@ -12,6 +12,7 @@ import {
   DEFAULT_AUTO_SPEED_SCALE,
   DEFAULT_BACKGROUND_COLOR,
   DEFAULT_HIDE_CURSOR,
+  DEFAULT_INSECT_MANUAL_PATTERN,
   DEFAULT_MANUAL_SPEED_SCALE,
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
@@ -24,6 +25,7 @@ import {
   normalizeAutoDisabledTypes,
   normalizeHexColor,
   normalizeHideCursor,
+  normalizeInsectManualPattern,
   normalizeMode,
   normalizeMuted,
   normalizeSettings,
@@ -119,6 +121,41 @@ describe("normalizeMode", () => {
     expect(normalizeMode(undefined)).toBe("manual");
     expect(normalizeMode(null)).toBe("manual");
     expect(normalizeMode(1)).toBe("manual");
+  });
+});
+
+describe("normalizeInsectManualPattern", () => {
+  it("'follow' のみ follow、'click'/その他文字列/欠損は既定 click", () => {
+    expect(normalizeInsectManualPattern("follow")).toBe("follow");
+    expect(normalizeInsectManualPattern("click")).toBe("click");
+    expect(normalizeInsectManualPattern("weird")).toBe("click");
+    expect(normalizeInsectManualPattern(undefined)).toBe("click");
+    expect(normalizeInsectManualPattern(null)).toBe("click");
+  });
+
+  it("型不一致(boolean/数値/配列/オブジェクト/空文字/前後空白)は既定 click へ", () => {
+    // 破損/改竄 localStorage 由来の異常型が黙って follow に化けないことの契約実証（=== 厳密比較）。
+    expect(normalizeInsectManualPattern(true)).toBe("click");
+    expect(normalizeInsectManualPattern(false)).toBe("click");
+    expect(normalizeInsectManualPattern(0)).toBe("click");
+    expect(normalizeInsectManualPattern(1)).toBe("click");
+    expect(normalizeInsectManualPattern("")).toBe("click");
+    // trim しないため前後空白付きは非受理（許可集合の厳密一致のみ）。
+    expect(normalizeInsectManualPattern(" follow ")).toBe("click");
+    expect(normalizeInsectManualPattern(["follow"])).toBe("click");
+    expect(normalizeInsectManualPattern({ pattern: "follow" })).toBe("click");
+  });
+
+  it("Symbol/BigInt は例外を投げず既定 click へ", () => {
+    // === 比較のみで型を問わないため、Number(Symbol) のような TypeError を投げない。
+    expect(() => normalizeInsectManualPattern(Symbol("follow"))).not.toThrow();
+    expect(normalizeInsectManualPattern(Symbol("follow"))).toBe("click");
+    expect(normalizeInsectManualPattern(10n)).toBe("click");
+  });
+
+  it("既定は click（DEFAULT_INSECT_MANUAL_PATTERN と一致）", () => {
+    expect(DEFAULT_INSECT_MANUAL_PATTERN).toBe("click");
+    expect(normalizeInsectManualPattern("nope")).toBe(DEFAULT_INSECT_MANUAL_PATTERN);
   });
 });
 
@@ -337,6 +374,7 @@ describe("createDefaultSettings", () => {
       hideCursor: DEFAULT_HIDE_CURSOR,
       mode: DEFAULT_MODE,
       manualTypeId: DEFAULT_MANUAL_TYPE_ID,
+      insectManualPattern: DEFAULT_INSECT_MANUAL_PATTERN,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
@@ -344,6 +382,7 @@ describe("createDefaultSettings", () => {
       manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
       autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
     });
+    expect(DEFAULT_INSECT_MANUAL_PATTERN).toBe("click");
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
     expect(DEFAULT_MUTED).toBe(false);
     expect(DEFAULT_HIDE_CURSOR).toBe(false);
@@ -379,6 +418,7 @@ describe("normalizeSettings", () => {
         hideCursor: true,
         mode: "auto",
         manualTypeId: FOXTAIL_TYPE_ID,
+        insectManualPattern: "follow",
         autoSpawnIntervalMs: 900,
         autoPlayLimitMinutes: 15,
         customCritterImageId: "critter-1",
@@ -393,6 +433,7 @@ describe("normalizeSettings", () => {
       hideCursor: true,
       mode: "auto",
       manualTypeId: FOXTAIL_TYPE_ID,
+      insectManualPattern: "follow",
       autoSpawnIntervalMs: 900,
       autoPlayLimitMinutes: 15,
       customCritterImageId: "critter-1",
@@ -467,6 +508,21 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ hideCursor: "true" }).hideCursor).toBe(false);
     expect(normalizeSettings({ hideCursor: 1 }).hideCursor).toBe(false);
     expect(normalizeSettings({ hideCursor: null }).hideCursor).toBe(false);
+  });
+
+  it("[UR3-5] insectManualPattern は 'follow' のみ follow、欠損/許可集合外/異常型は既定 click", () => {
+    // 欠損はデフォルト click（フィールドを持たない旧 localStorage との後方互換）。
+    expect(normalizeSettings({}).insectManualPattern).toBe("click");
+    // follow のみ follow。
+    expect(normalizeSettings({ insectManualPattern: "follow" }).insectManualPattern).toBe("follow");
+    // 許可集合外/異常型は click（破損/改竄 localStorage 由来が follow に化けない）。
+    expect(normalizeSettings({ insectManualPattern: "weird" }).insectManualPattern).toBe("click");
+    expect(normalizeSettings({ insectManualPattern: true }).insectManualPattern).toBe("click");
+    expect(normalizeSettings({ insectManualPattern: 1 }).insectManualPattern).toBe("click");
+    expect(normalizeSettings({ insectManualPattern: null }).insectManualPattern).toBe("click");
+    expect(normalizeSettings({ insectManualPattern: ["follow"] }).insectManualPattern).toBe(
+      "click",
+    );
   });
 
   it("autoDisabledTypes は配列の文字列のみ・重複除去、非配列/欠損は []", () => {
@@ -594,6 +650,7 @@ describe("serializeSettings / parseSettings", () => {
       hideCursor: true,
       mode: "auto" as const,
       manualTypeId: INSECT_TYPE_ID,
+      insectManualPattern: "follow" as const,
       autoSpawnIntervalMs: 2400,
       autoPlayLimitMinutes: 10,
       customCritterImageId: "critter-xyz",
@@ -616,6 +673,7 @@ describe("serializeSettings / parseSettings", () => {
       "background",
       "customCritterImageId",
       "hideCursor",
+      "insectManualPattern",
       "manualSpeedScale",
       "manualTypeId",
       "masterVolume",
@@ -643,6 +701,7 @@ describe("serializeSettings / parseSettings", () => {
       hideCursor: DEFAULT_HIDE_CURSOR,
       mode: DEFAULT_MODE,
       manualTypeId: DEFAULT_MANUAL_TYPE_ID,
+      insectManualPattern: DEFAULT_INSECT_MANUAL_PATTERN,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
@@ -676,6 +735,25 @@ describe("serializeSettings / parseSettings", () => {
     expect(parseSettings(serializeSettings(off)).hideCursor).toBe(false);
     // hideCursor フィールドを持たない旧 localStorage JSON は false へフォールバック。
     expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').hideCursor).toBe(false);
+  });
+
+  it("insectManualPattern 往復: follow は保持、許可集合外/欠損は既定(click)へフォールバック", () => {
+    // follow → serialize → parse で保持。
+    const on = createDefaultSettings();
+    on.insectManualPattern = "follow";
+    expect(parseSettings(serializeSettings(on)).insectManualPattern).toBe("follow");
+    // click も保持。
+    const off = createDefaultSettings();
+    off.insectManualPattern = "click";
+    expect(parseSettings(serializeSettings(off)).insectManualPattern).toBe("click");
+    // 許可集合外の永続値は既定 click へ落とす。
+    expect(parseSettings('{"insectManualPattern":"weird"}').insectManualPattern).toBe(
+      DEFAULT_INSECT_MANUAL_PATTERN,
+    );
+    // insectManualPattern フィールドを持たない旧 localStorage JSON は既定 click へフォールバック。
+    expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').insectManualPattern).toBe(
+      DEFAULT_INSECT_MANUAL_PATTERN,
+    );
   });
 
   it("manualTypeId 往復: 選択可能値は保持、範囲外/欠損は既定(mouse)へフォールバック", () => {

@@ -14,6 +14,13 @@ export type BackgroundType = "color" | "image";
 /** 表示モード。manual=マウス操作（1体を追従）/ auto=動画モード（自動で出現・横切り）。 */
 export type AppMode = "manual" | "auto";
 
+/**
+ * [UR3-5] マウス操作モードで操作対象が「虫」のときの動きパターン。
+ * click=クリックした位置へ虫が画面外から飛び込み複数出現（UR3-4 の挙動）/
+ * follow=1 匹の虫がネズミのようにカーソルへ追従する。既定は click（従来挙動を保つ）。
+ */
+export type InsectManualPattern = "click" | "follow";
+
 /** 背景設定。type=image のとき imageId が IndexedDB のキーを指す。 */
 export interface BackgroundSettings {
   type: BackgroundType;
@@ -47,6 +54,12 @@ export interface AppSettings {
    * UR-4 時点は全対象がカーソル追従（プレースホルダ）。固有 manual 挙動は UR-5/UR-6 で差し替える。
    */
   manualTypeId: string;
+  /**
+   * [UR3-5] 操作対象=虫のときの動きパターン（click=クリックで出現 / follow=マウス追従）。既定 click。
+   * 操作対象が虫以外のときは無視されるが値は保持し、虫を選び直すと復元される。
+   * 許可集合外/異常型の永続値は click へ正規化する（normalizeInsectManualPattern）。
+   */
+  insectManualPattern: InsectManualPattern;
   /** auto モードのオブジェクト出現間隔(ms)。 */
   autoSpawnIntervalMs: number;
   /**
@@ -89,6 +102,8 @@ export const DEFAULT_MUTED = false;
 export const DEFAULT_HIDE_CURSOR = false;
 /** 既定の表示モード。 */
 export const DEFAULT_MODE: AppMode = "manual";
+/** [UR3-5] 操作対象=虫の動きパターンの既定（click=クリックで出現＝従来 UR3-4 挙動）。 */
+export const DEFAULT_INSECT_MANUAL_PATTERN: InsectManualPattern = "click";
 /** auto モードの既定出現間隔(ms)。 */
 export const DEFAULT_AUTO_SPAWN_INTERVAL_MS = 1500;
 /** 出現間隔の下限(ms)。極小値による spawn 暴走を UI/設定段で防ぐ。 */
@@ -113,6 +128,21 @@ export const DEFAULT_AUTO_SPEED_SCALE = 1.8;
 export const MIN_SPEED_SCALE = 0.3;
 /** 動きの速さ倍率の上限（永続値の暴走ガード）。manual/auto 共通。 */
 export const MAX_SPEED_SCALE = 2.5;
+
+/** [UR3-5] 虫の動きパターン UI 選択肢 1 件。value は正規化許可集合、label は UI 表示名。 */
+export interface InsectManualPatternOption {
+  value: InsectManualPattern;
+  label: string;
+}
+
+/**
+ * [UR3-5] UI（マウスモードタブ）に並べる虫の動きパターン選択肢。
+ * click を先頭（既定）に置く。この配列が「セレクタ候補」かつ順序の単一の真実源になる。
+ */
+export const INSECT_MANUAL_PATTERN_OPTIONS: readonly InsectManualPatternOption[] = [
+  { value: "click", label: "クリックで出現" },
+  { value: "follow", label: "マウス追従" },
+];
 
 /** UI 用の動きの速さ倍率選択肢（ラベルと値）。 */
 export interface SpeedScaleOption {
@@ -198,6 +228,16 @@ export function clampVolume(value: unknown): number {
 /** 表示モードを正規化する。"auto" のみ auto、その他は既定(manual)。 */
 export function normalizeMode(value: unknown): AppMode {
   return value === "auto" ? "auto" : "manual";
+}
+
+/**
+ * [UR3-5] 虫の動きパターンを正規化する。許可集合 {"click","follow"} の "follow" のみ follow、
+ * それ以外（"click"・許可集合外の文字列・boolean/null/数値/配列/オブジェクト/Symbol/BigInt/欠損）は
+ * 既定 click へフォールバックする。=== 比較のみで型を問わず例外を投げない
+ * （破損/改竄 localStorage 由来の異常入力に対する堅牢化。normalizeMode と同流儀）。
+ */
+export function normalizeInsectManualPattern(value: unknown): InsectManualPattern {
+  return value === "follow" ? "follow" : "click";
 }
 
 /**
@@ -293,6 +333,7 @@ export function createDefaultSettings(): AppSettings {
     hideCursor: DEFAULT_HIDE_CURSOR,
     mode: DEFAULT_MODE,
     manualTypeId: DEFAULT_MANUAL_TYPE_ID,
+    insectManualPattern: DEFAULT_INSECT_MANUAL_PATTERN,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
     autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
     customCritterImageId: null,
@@ -314,6 +355,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   hideCursor: DEFAULT_HIDE_CURSOR,
   mode: DEFAULT_MODE,
   manualTypeId: DEFAULT_MANUAL_TYPE_ID,
+  insectManualPattern: DEFAULT_INSECT_MANUAL_PATTERN,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   customCritterImageId: null,
@@ -366,6 +408,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     hideCursor: normalizeHideCursor(obj.hideCursor),
     mode: normalizeMode(obj.mode),
     manualTypeId: normalizeManualTypeId(obj.manualTypeId),
+    insectManualPattern: normalizeInsectManualPattern(obj.insectManualPattern),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
     autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
     customCritterImageId,
@@ -388,6 +431,7 @@ export function serializeSettings(settings: AppSettings): string {
     hideCursor: settings.hideCursor,
     mode: settings.mode,
     manualTypeId: settings.manualTypeId,
+    insectManualPattern: settings.insectManualPattern,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
     autoPlayLimitMinutes: settings.autoPlayLimitMinutes,
     customCritterImageId: settings.customCritterImageId,

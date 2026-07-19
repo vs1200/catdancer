@@ -1,15 +1,18 @@
 import type { AudioManager } from "../audio/AudioManager";
+import { INSECT_TYPE_ID } from "../critters/types/insect";
 import { MANUAL_TARGETS } from "../settings/manualTargets";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type {
   AppMode,
   AppSettings,
   BackgroundSettings,
+  InsectManualPattern,
   SpeedScaleOption,
 } from "../settings/settingsData";
 import {
   AUTO_PLAY_LIMIT_OPTIONS_MINUTES,
   AUTO_SPEED_SCALE_OPTIONS,
+  INSECT_MANUAL_PATTERN_OPTIONS,
   MAX_AUTO_SPAWN_INTERVAL_MS,
   MIN_AUTO_SPAWN_INTERVAL_MS,
   SPEED_SCALE_OPTIONS,
@@ -105,7 +108,7 @@ function createHelpSection(): HTMLElement {
     ],
     [
       "操作するもの",
-      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫）を選べます。",
+      "マウス操作モードでは「マウスモード」タブで対象（ネズミ／ねこじゃらし／おもちゃ／虫）を選べます。虫を選ぶと、動きパターン（クリックで出現／マウス追従）も選べます。",
     ],
     ["キーボード", "Space＝一時停止／再開、f＝全画面の切替、m＝モードの切替。"],
   ];
@@ -161,6 +164,10 @@ export class OptionsPanel {
   private readonly modeSelect: HTMLSelectElement;
   /** [UR-4] 操作するもの select（マウスモードタブ。常時編集可）。 */
   private readonly manualTypeSelect: HTMLSelectElement;
+  /** [UR3-5] 虫の動きパターン select（マウスモードタブ。操作対象=虫のときだけ表示）。 */
+  private readonly insectPatternSelect: HTMLSelectElement;
+  /** [UR3-5] 虫の動きパターン section（操作対象=虫のときだけ表示・他種別では hidden）。 */
+  private readonly insectPatternSection: HTMLElement;
   /** [UR3-8] マウス操作モードの動きの速さ select（マウスモードタブ）。 */
   private readonly manualSpeedSelect: HTMLSelectElement;
   /** [UR3-8] 動画モード(auto)の動きの速さ select（動画モードタブ。底上げ済み選択肢）。 */
@@ -313,6 +320,31 @@ export class OptionsPanel {
       this.settings.setManualTypeId(manualTypeSelect.value);
     });
     manualTypeRow.append(manualTypeLabel, manualTypeSelect);
+
+    // [UR3-5] 虫の動きパターン（クリックで出現 / マウス追従）。操作対象=虫のときだけ表示する
+    // （syncManualType が section.hidden をトグル）。change → settings.setInsectManualPattern（永続化＋
+    // 購読で main が虫コントローラを作り直す）。値は modeSelect と同じく許可集合の ternary で確定させる。
+    const insectPatternRow = document.createElement("div");
+    insectPatternRow.className = "cd-options-row";
+    const insectPatternLabel = document.createElement("label");
+    insectPatternLabel.className = "cd-options-label";
+    insectPatternLabel.textContent = "動きパターン";
+    insectPatternLabel.htmlFor = "cd-insect-pattern-select";
+    const insectPatternSelect = document.createElement("select");
+    insectPatternSelect.id = "cd-insect-pattern-select";
+    insectPatternSelect.className = "cd-options-select";
+    for (const opt of INSECT_MANUAL_PATTERN_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      insectPatternSelect.appendChild(option);
+    }
+    insectPatternSelect.addEventListener("change", () => {
+      this.settings.setInsectManualPattern(
+        insectPatternSelect.value === "follow" ? "follow" : "click",
+      );
+    });
+    insectPatternRow.append(insectPatternLabel, insectPatternSelect);
 
     // 出現プリセット（動画モードタブ）。出現間隔＋出現する種類をワンタップで束ねて切り替える。
     // click → settings.applySpawnPreset。適用後は syncFromSettings 経由で interval スライダ表示・
@@ -574,14 +606,17 @@ export class OptionsPanel {
       helpSection,
     );
 
-    // --- マウスモードタブ: 操作するもの・動き(速さ) ---
+    // --- マウスモードタブ: 操作するもの・(虫のみ)動きパターン・動き(速さ) ---
     const manualSection = createSection("操作対象");
     manualSection.appendChild(manualTypeRow);
+    // [UR3-5] 虫の動きパターン section。操作対象=虫のときだけ表示する（syncManualType が hidden を制御）。
+    const insectPatternSection = createSection("動きパターン");
+    insectPatternSection.appendChild(insectPatternRow);
     // [UR3-8] マウス操作モードの動きの速さ（従来の選択肢を据置）。
     const manualMotionSection = createSection("動き");
     manualMotionSection.appendChild(manualSpeedRow);
     const manualPanel = this.createTabPanel(1);
-    manualPanel.append(manualSection, manualMotionSection);
+    manualPanel.append(manualSection, insectPatternSection, manualMotionSection);
 
     // --- 動画モードタブ: 動き(速さ)・出現(プリセット/出現間隔)・出現する種類・遊びすぎ防止 ---
     // [UR3-8] 動画モードの動きの速さ（底上げ済み）。要望「動画モードが全体的に遅い」への主対応のため
@@ -623,6 +658,8 @@ export class OptionsPanel {
     this.hideCursorInput = hideCursorInput;
     this.modeSelect = modeSelect;
     this.manualTypeSelect = manualTypeSelect;
+    this.insectPatternSelect = insectPatternSelect;
+    this.insectPatternSection = insectPatternSection;
     this.manualSpeedSelect = manualSpeedSelect;
     this.autoSpeedSelect = autoSpeedSelect;
     this.intervalInput = intervalInput;
@@ -845,6 +882,7 @@ export class OptionsPanel {
   private syncFromSettings(settings: AppSettings): void {
     this.syncMode(settings.mode, settings.autoSpawnIntervalMs, settings.autoPlayLimitMinutes);
     this.syncManualType(settings.manualTypeId);
+    this.syncInsectPattern(settings.insectManualPattern);
     this.syncSpeed(this.manualSpeedSelect, SPEED_SCALE_OPTIONS, settings.manualSpeedScale);
     this.syncSpeed(this.autoSpeedSelect, AUTO_SPEED_SCALE_OPTIONS, settings.autoSpeedScale);
     this.syncBackground(settings.background);
@@ -886,6 +924,18 @@ export class OptionsPanel {
   private syncManualType(manualTypeId: string): void {
     if (this.manualTypeSelect.value !== manualTypeId) {
       this.manualTypeSelect.value = manualTypeId;
+    }
+    // [UR3-5] 虫の動きパターン UI は操作対象=虫のときだけ表示する（他種別選択で隠す）。
+    this.insectPatternSection.hidden = manualTypeId !== INSECT_TYPE_ID;
+  }
+
+  /**
+   * [UR3-5] 虫の動きパターン select を settings.insectManualPattern から復元する（外部変更にも追従）。
+   * 表示/非表示は syncManualType が操作対象に応じて切替える（本メソッドは値のみ同期）。
+   */
+  private syncInsectPattern(pattern: InsectManualPattern): void {
+    if (this.insectPatternSelect.value !== pattern) {
+      this.insectPatternSelect.value = pattern;
     }
   }
 

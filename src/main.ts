@@ -152,6 +152,9 @@ async function bootstrap(): Promise<void> {
         pointer: pointerInput,
         scene,
       });
+  // [UR3-5] 虫の動きパターン（click=クリックで出現 / follow=マウス追従）。虫コントローラ factory が
+  // 参照する現在値。subscribe が最新の永続値へ更新し、pattern 変更/種別切替時に factory を呼び直して反映する。
+  let insectManualPattern = settings.settings.insectManualPattern;
   const manualFactories = new Map<string, ManualControllerFactory>([
     [MOUSE_TYPE_ID, makeFollowFactory(MOUSE_TYPE_ID, bodyTexture, tailTexture)],
     // [UR-5b] 猫じゃらしだけは固有挙動（端から差し込んで穂をふりふり）へ差し替える。
@@ -166,16 +169,28 @@ async function bootstrap(): Promise<void> {
         }),
     ],
     [TOYS_TYPE_ID, makeFollowFactory(TOYS_TYPE_ID, toysTexture)],
-    // [UR-6] 虫だけは固有挙動（クリックした位置に出現・複数同時・素早いダッシュで動き回り world 外へ退場）
-    // へ差し替える。他種別（ネズミ/おもちゃ）は従来どおりカーソル追従(FollowManualController)のまま。
+    // [UR3-5] 虫は「動きパターン」設定で 2 挙動を切替える（他種別=ネズミ/おもちゃは従来どおり追従のまま）。
+    //  - click（既定・UR3-4）: InsectManualController = 画面外→クリック位置へ飛び込み・複数同時・cap18・羽音。
+    //  - follow: FollowManualController(insect) = 1 匹がカーソル追従＋進行方向へ回頭(faceMode=rotate)＋羽音
+    //    （クリックは voice/clickWiggle 無しのため無音 no-op）。既存部品の差し替えのみで実現する。
+    // insectManualPattern（closure）は subscribe が最新の永続値へ更新し、pattern 変更/種別切替時に
+    // rebuildCurrent()/setManualType() がこの factory を呼び直して反映する。
     [
       INSECT_TYPE_ID,
       () =>
-        new InsectManualController({
-          bodyTexture: insectTexture,
-          audio,
-          scene,
-        }),
+        insectManualPattern === "follow"
+          ? new FollowManualController({
+              typeId: INSECT_TYPE_ID,
+              bodyTexture: insectTexture,
+              audio,
+              pointer: pointerInput,
+              scene,
+            })
+          : new InsectManualController({
+              bodyTexture: insectTexture,
+              audio,
+              scene,
+            }),
     ],
   ]);
   const manualMode = new ManualMode({
@@ -404,6 +419,7 @@ async function bootstrap(): Promise<void> {
   // 設定変更の反映（音量/背景 + モード/出現間隔 + カスタム画像クリッター）。前回値と比較して差分だけ反映する。
   let prevMode = settings.settings.mode;
   let prevManualTypeId = settings.settings.manualTypeId;
+  let prevInsectManualPattern = settings.settings.insectManualPattern;
   let prevInterval = settings.settings.autoSpawnIntervalMs;
   let prevPlayLimit = settings.settings.autoPlayLimitMinutes;
   let prevCustomCritterId = settings.settings.customCritterImageId;
@@ -469,6 +485,17 @@ async function bootstrap(): Promise<void> {
     if (next.mode !== prevMode) {
       prevMode = next.mode;
       switchTo(next.mode);
+    }
+    // [UR3-5] 虫の動きパターン変更を反映する（manualTypeId 判定の前に closure を更新しておくことで、
+    // 同一通知で種別も虫へ変わった稀ケースでも新パターンで factory が立ち上がる）。
+    if (next.insectManualPattern !== prevInsectManualPattern) {
+      prevInsectManualPattern = next.insectManualPattern;
+      insectManualPattern = next.insectManualPattern;
+      // 虫を操作中なら現行コントローラを作り直して新パターンへ切替える（既存虫を全 despawn してから
+      // 新パターンで再構築＝残留/リークなし）。虫以外を操作中なら再構築せず、次に虫を選び直した時に反映する。
+      if (manualMode.currentType === INSECT_TYPE_ID) {
+        manualMode.rebuildCurrent();
+      }
     }
     if (next.manualTypeId !== prevManualTypeId) {
       prevManualTypeId = next.manualTypeId;

@@ -327,6 +327,64 @@ describe("ManualMode: setManualType()", () => {
   });
 });
 
+describe("ManualMode: rebuildCurrent()", () => {
+  it("[UR3-5] 実行中は typeId を変えず 旧stop → 新create → 新start で作り直す", () => {
+    const log: string[] = [];
+    const mouse = makeFactory("mouse", log);
+    const mode = makeMode(
+      { mouse: mouse.factory },
+      { initialTypeId: "mouse", fallbackTypeId: "mouse" },
+    );
+    mode.start();
+    log.length = 0; // start ぶんのログを捨て、rebuild の順序だけを見る。
+    mode.rebuildCurrent();
+    expect(log).toEqual(["mouse:stop", "mouse:create", "mouse:start"]);
+    expect(mode.currentType).toBe("mouse");
+    // factory は start(1) + rebuild(1) で計 2 回。以後の update は新 instance のみが受ける（旧は破棄）。
+    expect(mouse.factory).toHaveBeenCalledTimes(2);
+    mode.update(0.1);
+    expect(mouse.instances[0].update).not.toHaveBeenCalled();
+    expect(mouse.instances[1].update).toHaveBeenCalledWith(0.1);
+  });
+
+  it("[UR3-5] 未起動なら no-op（factory も stop も呼ばれず throw もしない）", () => {
+    const log: string[] = [];
+    const mouse = makeFactory("mouse", log);
+    const mode = makeMode(
+      { mouse: mouse.factory },
+      { initialTypeId: "mouse", fallbackTypeId: "mouse" },
+    );
+    expect(() => mode.rebuildCurrent()).not.toThrow();
+    expect(mouse.factory).not.toHaveBeenCalled();
+  });
+
+  it("[UR3-5] paused=true 中の rebuild は新 controller へ setPaused(true) を再適用する", () => {
+    const log: string[] = [];
+    const mouse = makeFactory("mouse", log);
+    const mode = makeMode(
+      { mouse: mouse.factory },
+      { initialTypeId: "mouse", fallbackTypeId: "mouse" },
+    );
+    mode.start();
+    mode.setPaused(true);
+    mode.rebuildCurrent();
+    expect(mouse.instances[1].setPaused).toHaveBeenCalledWith(true);
+  });
+
+  it("[UR3-5] setSpeedScale 済みで rebuild すると新 controller へ speedScale が反映される", () => {
+    const log: string[] = [];
+    const mouse = makeFactory("mouse", log);
+    const mode = makeMode(
+      { mouse: mouse.factory },
+      { initialTypeId: "mouse", fallbackTypeId: "mouse" },
+    );
+    mode.start();
+    mode.setSpeedScale(2.5);
+    mode.rebuildCurrent();
+    expect(mouse.instances[1].setSpeedScale).toHaveBeenCalledWith(2.5);
+  });
+});
+
 describe("ManualMode: createController の factory 欠落（異常系）", () => {
   it("currentType/fallback とも factories に無い場合、start で Error を throw する", () => {
     const mode = makeMode({}, { initialTypeId: "unknown", fallbackTypeId: "mouse" });

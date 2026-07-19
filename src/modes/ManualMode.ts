@@ -95,8 +95,27 @@ export class ManualMode implements Mode {
       return;
     }
     this.currentTypeId = next;
+    this.restartController();
+  }
+
+  /**
+   * [UR3-5] 現在の操作対象のコントローラを typeId を変えずに作り直す（旧 stop→新 create+start）。
+   * factory が外部状態（例: 虫の動きパターン設定）に応じて生成物を変える場合に、その変更を
+   * 実行中の 1 体へ反映するために使う（虫: InsectManualController↔FollowManualController の切替）。
+   * 未起動なら no-op（次の start が最新 factory で立ち上げる）。paused/speedScale は引き継ぐ。
+   */
+  rebuildCurrent(): void {
+    this.restartController();
+  }
+
+  /**
+   * 現行コントローラを stop→create+start で作り直す共通処理（setManualType / rebuildCurrent が共有）。
+   * 未起動/未生成なら no-op。paused 中は新コントローラへ paused を再適用し、speedScale は
+   * createController が保持値を反映する。前の 1 体（critter/pointer/audio）はリークなく破棄される。
+   */
+  private restartController(): void {
     if (!this.running || !this.controller) {
-      return; // 未起動なら typeId 更新のみ（次の start が新種別で立ち上げる）。
+      return;
     }
     this.controller.stop();
     const controller = this.createController();

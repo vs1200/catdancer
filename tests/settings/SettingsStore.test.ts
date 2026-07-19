@@ -112,3 +112,35 @@ describe("SettingsStore.setManualTypeId", () => {
     expect(store.settings.manualTypeId).toBe(DEFAULT_MANUAL_TYPE_ID);
   });
 });
+
+describe("SettingsStore.setInsectManualPattern", () => {
+  it("既定は click（クリックで出現）", () => {
+    const store = new SettingsStore("test:setInsectManualPattern:default");
+    expect(store.settings.insectManualPattern).toBe("click");
+  });
+
+  it("follow を snapshot に反映し、購読者へ通知する", () => {
+    const store = new SettingsStore("test:setInsectManualPattern:reflect");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.setInsectManualPattern("follow");
+    expect(store.settings.insectManualPattern).toBe("follow");
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ insectManualPattern: "follow" }),
+    );
+    // click へ戻すのも反映される。
+    store.setInsectManualPattern("click");
+    expect(store.settings.insectManualPattern).toBe("click");
+  });
+
+  it("許可集合外/異常型は既定 click へ正規化する（例外を投げない）", () => {
+    const store = new SettingsStore("test:setInsectManualPattern:normalize");
+    // @ts-expect-error 敵対的入力（許可集合外の文字列でも壊れず click へ正規化される）。
+    store.setInsectManualPattern("weird");
+    expect(store.settings.insectManualPattern).toBe("click");
+    // @ts-expect-error 敵対的入力（異常型でも例外を投げず click へ落ちる）。
+    expect(() => store.setInsectManualPattern(true)).not.toThrow();
+    expect(store.settings.insectManualPattern).toBe("click");
+  });
+});
