@@ -18,7 +18,7 @@ export interface OptionsTabDef {
  * 設定パネルのタブ並び（左から表示順）。初期選択は先頭（共通）。
  * - common: モード/表示/動きの速さ/音量/背景/オブジェクトなど全モード共通の設定。
  * - manual: マウス操作モード専用（操作するもの）。
- * - auto: 猫用動画モード専用（出現間隔/プリセット/出現する種類/遊びすぎ防止）。
+ * - auto: 動画モード専用（出現間隔/プリセット/出現する種類/遊びすぎ防止）。
  */
 export const OPTIONS_TABS: readonly OptionsTabDef[] = [
   { id: "common", label: "共通" },

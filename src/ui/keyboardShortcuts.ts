@@ -11,7 +11,7 @@
  * ショートカットのアクション種別。
  * - toggle-pause: 現行モードの一時停止トグル（合成pause の keyPaused 要因）。
  * - toggle-fullscreen: 全画面表示のトグル。
- * - toggle-mode: 表示モード切替（マウス操作 ⇄ 猫用動画）。
+ * - toggle-mode: 表示モード切替（マウス操作 ⇄ 動画モード）。
  */
 export type ShortcutAction = "toggle-pause" | "toggle-fullscreen" | "toggle-mode";
 

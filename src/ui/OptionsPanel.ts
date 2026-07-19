@@ -91,11 +91,11 @@ function createHelpSection(): HTMLElement {
   const items: ReadonlyArray<readonly [string, string]> = [
     [
       "タップ / クリック",
-      "猫用動画モードで、動いているオブジェクトをタップ（クリック）すると捕まえられます（逃げて音が鳴ります）。",
+      "動画モードで、動いているオブジェクトをタップ（クリック）すると捕まえられます（逃げて音が鳴ります）。",
     ],
     [
       "モード",
-      "「マウス操作モード」は選んだオブジェクトがカーソル（タッチ）に反応し、「猫用動画モード」は自動でオブジェクトが動き回ります。切替は「共通」タブのモード設定から。",
+      "「マウス操作モード」は選んだオブジェクトがカーソル（タッチ）に反応し、「動画モード」は自動でオブジェクトが動き回ります。切替は「共通」タブのモード設定から。",
     ],
     [
       "操作するもの",
@@ -219,7 +219,7 @@ export class OptionsPanel {
     // コントロール生成（配線は従来どおり。タブ割り当ては下部の「タブ組み立て」で行う）。
     // =========================================================================
 
-    // --- モード切替（マウス操作 / 猫用動画）。共通タブへ。 ---
+    // --- モード切替（マウス操作 / 動画モード）。共通タブへ。 ---
     const modeRow = document.createElement("div");
     modeRow.className = "cd-options-row";
     const modeLabel = document.createElement("label");
@@ -231,10 +231,10 @@ export class OptionsPanel {
     modeSelect.className = "cd-options-select";
     const manualOption = document.createElement("option");
     manualOption.value = "manual";
-    manualOption.textContent = "マウス操作";
+    manualOption.textContent = "マウス操作モード";
     const autoOption = document.createElement("option");
     autoOption.value = "auto";
-    autoOption.textContent = "猫用動画";
+    autoOption.textContent = "動画モード";
     modeSelect.append(manualOption, autoOption);
     modeSelect.addEventListener("change", () => {
       this.settings.setMode(modeSelect.value === "auto" ? "auto" : "manual");

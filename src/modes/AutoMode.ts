@@ -52,7 +52,7 @@ export interface AutoModeDeps {
 }
 
 /**
- * 猫用動画モード。一定間隔で登録済みの「auto 対象」種別（mouse / foxtail / toys）から重み付き
+ * 動画モード。一定間隔で登録済みの「auto 対象」種別（mouse / foxtail / toys）から重み付き
  * 乱数で選んで画面外(world 端)から spawn し、種別ごとの Movement（mouse=CrossMovement で横断,
  * foxtail/toys=DangleMovement で揺れて誘い縁へ退場）で動かし、world 外へ抜けたら despawn する。
  *

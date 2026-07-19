@@ -11,7 +11,7 @@ import { DEFAULT_MANUAL_TYPE_ID, normalizeManualTypeId } from "./manualTargets";
 /** 背景の種類。単色 or ユーザー画像。 */
 export type BackgroundType = "color" | "image";
 
-/** 表示モード。manual=マウス操作（1体を追従）/ auto=猫用動画（自動で出現・横切り）。 */
+/** 表示モード。manual=マウス操作（1体を追従）/ auto=動画モード（自動で出現・横切り）。 */
 export type AppMode = "manual" | "auto";
 
 /** 背景設定。type=image のとき imageId が IndexedDB のキーを指す。 */
@@ -39,7 +39,7 @@ export interface AppSettings {
    * 表示中は人間が操作できるよう通常表示のまま（表示制御は main.ts が担い、位置取得は不変）。
    */
   hideCursor: boolean;
-  /** 表示モード（manual=マウス操作 / auto=猫用動画）。 */
+  /** 表示モード（manual=マウス操作 / auto=動画モード）。 */
   mode: AppMode;
   /**
    * [UR-4] マウス操作モードで「操作するもの」の種別 id（既定 mouse＝ネズミ）。
@@ -50,7 +50,7 @@ export interface AppSettings {
   /** auto モードのオブジェクト出現間隔(ms)。 */
   autoSpawnIntervalMs: number;
   /**
-   * auto（猫用動画）モードの遊びすぎ防止タイマー上限(分)。既定 0（OFF＝無制限）。
+   * auto（動画モード）の遊びすぎ防止タイマー上限(分)。既定 0（OFF＝無制限）。
    * 到達すると自動停止し、動くオブジェクトを消して無音の穏やかな背景のみにする。
    */
   autoPlayLimitMinutes: number;

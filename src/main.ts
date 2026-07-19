@@ -61,7 +61,7 @@ const CUSTOM_CRITTER_WEIGHT = 1.5;
  *
  * ManualMode: ポインタへ慣性追従するネズミ 1 体（v1 の挙動）。
  * AutoMode: 一定間隔で mouse/foxtail/toys を重み付きでミックス spawn（ネズミ=横断、猫じゃらし/
- *   おもちゃ=揺れて誘い縁へ退場）→ 画面外で despawn（猫用動画）。
+ *   おもちゃ=揺れて誘い縁へ退場）→ 画面外で despawn（動画モード）。
  * mode / 出現間隔はオプション画面から変更・永続化し、reload で復元する。
  */
 async function bootstrap(): Promise<void> {

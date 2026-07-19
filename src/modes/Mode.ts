@@ -2,7 +2,7 @@
  * 表示モードの抽象（Strategy）。main が設定に応じて 1 つを start/stop し、毎フレーム update する。
  *
  * - ManualMode: マウス操作。1 体のネズミをポインタへ慣性追従させる（v1 の挙動を包む）。
- * - AutoMode: 猫用動画。一定間隔でオブジェクトを画面外から spawn → 横切り → 画面外で despawn。
+ * - AutoMode: 動画モード。一定間隔でオブジェクトを画面外から spawn → 横切り → 画面外で despawn。
  *
  * 各モードは自分が生成した critter・入力配線・SE を start/stop で完全に確保/解放する
  * （切替時にリーク・二重 spawn を出さない）。start/stop は多重呼び出しに対して冪等にする。
