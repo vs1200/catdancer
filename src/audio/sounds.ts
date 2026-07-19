@@ -21,13 +21,14 @@ export function registerCritterSounds(audio: AudioManager): void {
   // 鳴くたびに音程/長さを揺らして単調さを避ける。
   // [UR-3] ネズミの走行音/鳴き声はこの合成登録をフォールバックとして残しつつ、loadCritterSamples が
   // 同 id で実録サンプルを登録すると playOneShot/createLoop がそちらを優先する（ロード失敗時は合成のまま）。
-  audio.registerOneShot(MOUSE_SQUEAK_ID, (engine) => {
-    playSqueak(engine, makeSqueakParams());
+  // [UR4-4] 発火位置の pan を one-shot ビルダへ転送し、発音元の x で左右定位する（音 id は不変）。
+  audio.registerOneShot(MOUSE_SQUEAK_ID, (engine, pan) => {
+    playSqueak(engine, makeSqueakParams(), pan);
   });
   audio.registerLoop(MOUSE_SCURRY_ID, (engine) => createScurryVoice(engine));
   audio.registerLoop(INSECT_BUZZ_ID, (engine) => createBuzzVoice(engine));
   // voice を持たない種別（虫/猫じゃらし/おもちゃ/カスタム）の捕獲フィードバック用の汎用SE。
-  audio.registerOneShot(CATCH_ID, (engine) => playCatch(engine));
+  audio.registerOneShot(CATCH_ID, (engine, pan) => playCatch(engine, pan));
 }
 
 /**

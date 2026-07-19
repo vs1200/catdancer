@@ -205,7 +205,11 @@ export class FollowManualController implements ManualController {
   onPointerDown(_worldX: number, _worldY: number): void {
     const voice = getCritterType(this.deps.typeId).sounds.voice;
     if (voice) {
-      this.deps.audio.playOneShot(voice);
+      // [UR4-4] クリック鳴きも現在の critter の x 位置で左右定位する（左を追従中は左から鳴く）。
+      const pan = this.critter
+        ? panFromX(this.critter.state.position.x, this.deps.scene.worldBounds.viewport.width)
+        : 0;
+      this.deps.audio.playOneShot(voice, pan);
     }
     if (this.clickWiggle) {
       this.wiggle = { elapsed: 0 };

@@ -289,8 +289,10 @@ export class AutoMode implements Mode {
     }
     best.flee(worldX, worldY);
     // 反応SE: 種別に voice があればそれ、無ければ汎用キャッチSE。
+    // [UR4-4] 捕獲した critter の x 位置で発火時に左右定位する（画面左の critter は左から鳴る）。
     const voice = getCritterType(best.state.typeId).sounds.voice;
-    this.deps.audio.playOneShot(voice ?? CATCH_ID);
+    const pan = panFromX(best.state.position.x, this.deps.scene.worldBounds.viewport.width);
+    this.deps.audio.playOneShot(voice ?? CATCH_ID, pan);
     return true;
   }
 

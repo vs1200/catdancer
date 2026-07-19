@@ -7,7 +7,11 @@ import { MOUSE_SQUEAK_ID } from "../../src/audio/sounds";
 import type { LoopVoice } from "../../src/audio/synth";
 import { createWorldBounds, type Viewport } from "../../src/core/worldBounds";
 import type { CritterType } from "../../src/critters/CritterType";
-import { registerCritterType, unregisterCritterType } from "../../src/critters/registry";
+import {
+  hasCritterType,
+  registerCritterType,
+  unregisterCritterType,
+} from "../../src/critters/registry";
 import { createImageCritterType } from "../../src/critters/types/imageCritter";
 import { insectType } from "../../src/critters/types/insect";
 import { mouseType, registerMouseType } from "../../src/critters/types/mouse";
@@ -33,10 +37,13 @@ function makeFakeSink() {
   const levels: number[] = [];
   const pans: number[] = [];
   const fired: string[] = [];
+  // [UR4-4] クリック鳴きに渡った pan の記録（発火位置の左右定位検証）。
+  const firedPans: number[] = [];
   let loopsCreated = 0;
   const sink: AudioSink = {
-    playOneShot: (id) => {
+    playOneShot: (id, pan) => {
       fired.push(id);
+      firedPans.push(pan ?? 0);
     },
     createLoop: (): LoopVoice => {
       loopsCreated++;
@@ -56,6 +63,7 @@ function makeFakeSink() {
     levels,
     pans,
     fired,
+    firedPans,
     get loopsCreated() {
       return loopsCreated;
     },
@@ -130,9 +138,40 @@ describe("FollowManualController の自動SE抑制（UR4-5）", () => {
     // 自動チュー(voice スケジューラ)も発火しない（present=false で scheduler を進めないため）。
     expect(sink.fired).toHaveLength(0);
     // クリックで鳴き声(squeak)が 1 発鳴る（onPointerDown→playOneShot(voice) は維持）。
+    // [UR4-4] このとき pan は現在の critter の x 由来。右へ追従してきたので x>中央 → pan>0（右定位）。
     controller.onPointerDown(10, 20);
     expect(sink.fired).toEqual([MOUSE_SQUEAK_ID]);
+    expect(sink.firedPans).toHaveLength(1);
+    expect(sink.firedPans[0]).toBeGreaterThan(0);
     controller.stop();
+  });
+
+  it("[UR4-4] クリック鳴きの pan は追従位置で反転する（左追従→負 / 右追従→正）", () => {
+    // mouse は先行テストで登録済みのことがある（このファイルは unregister しない）。二重登録を避ける。
+    if (!hasCritterType("mouse")) {
+      registerMouseType();
+    }
+    // 左追従: ポインタ左外 → critter が左へ → クリック鳴きの pan が負。
+    const left = buildController("mouse");
+    left.controller.start();
+    left.pointerState.value = { x: -VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+    for (let i = 0; i < 60; i++) {
+      left.controller.update(1 / 60);
+    }
+    left.controller.onPointerDown(0, 0);
+    expect(left.sink.firedPans.at(-1)).toBeLessThan(0);
+    left.controller.stop();
+
+    // 右追従: ポインタ右外 → critter が右へ → クリック鳴きの pan が正。
+    const right = buildController("mouse");
+    right.controller.start();
+    right.pointerState.value = { x: VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+    for (let i = 0; i < 60; i++) {
+      right.controller.update(1 / 60);
+    }
+    right.controller.onPointerDown(0, 0);
+    expect(right.sink.firedPans.at(-1)).toBeGreaterThan(0);
+    right.controller.stop();
   });
 
   it("フラグ無し種別: 追従速度に連動して走行音(move ループSE)を駆動する（抑制は mouse 限定）", () => {

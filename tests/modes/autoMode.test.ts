@@ -393,7 +393,8 @@ describe("AutoMode.handleTap 捕獲フィードバック", () => {
     const modeVoice = startedModeWith(audioVoice.sink, [cVoice]);
     expect(modeVoice.handleTap(400, 300)).toBe(true);
     expect(audioVoice.playOneShot).toHaveBeenCalledTimes(1);
-    expect(audioVoice.playOneShot).toHaveBeenCalledWith(VOICE_ID);
+    // [UR4-4] critter x=400 / viewport 幅 800 → pan=(400/800)*2-1=0（中央）で発火する。
+    expect(audioVoice.playOneShot).toHaveBeenCalledWith(VOICE_ID, 0);
     modeVoice.stop();
 
     const audioPlain = makeFakeAudio();
@@ -401,8 +402,25 @@ describe("AutoMode.handleTap 捕獲フィードバック", () => {
     const modePlain = startedModeWith(audioPlain.sink, [cPlain]);
     expect(modePlain.handleTap(400, 300)).toBe(true);
     expect(audioPlain.playOneShot).toHaveBeenCalledTimes(1);
-    expect(audioPlain.playOneShot).toHaveBeenCalledWith(CATCH_ID);
+    expect(audioPlain.playOneShot).toHaveBeenCalledWith(CATCH_ID, 0);
     modePlain.stop();
+  });
+
+  it("[UR4-4] 捕獲SEは critter の x 位置で左右定位する（左=負 pan / 右=正 pan）", () => {
+    // viewport 幅 800。左寄り critter(x=100)→pan=-0.75、右寄り critter(x=700)→pan=0.75。
+    const audioLeft = makeFakeAudio();
+    const cLeft = makeCritter(VOICE_TYPE, 100, 300, 100);
+    const modeLeft = startedModeWith(audioLeft.sink, [cLeft]);
+    expect(modeLeft.handleTap(100, 300)).toBe(true);
+    expect(audioLeft.playOneShot).toHaveBeenCalledWith(VOICE_ID, expect.closeTo(-0.75, 6));
+    modeLeft.stop();
+
+    const audioRight = makeFakeAudio();
+    const cRight = makeCritter(VOICE_TYPE, 700, 300, 100);
+    const modeRight = startedModeWith(audioRight.sink, [cRight]);
+    expect(modeRight.handleTap(700, 300)).toBe(true);
+    expect(audioRight.playOneShot).toHaveBeenCalledWith(VOICE_ID, expect.closeTo(0.75, 6));
+    modeRight.stop();
   });
 
   it("(6a) not running（start 前）は false かつ副作用なし", () => {
