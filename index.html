@@ -17,12 +17,30 @@
         overflow: hidden;
         background: #000;
       }
+      /*
+       * プレイ領域（#app とその canvas）だけタッチ操作を最適化する。
+       * 設定パネル(.cd-options-panel)・歯車・各オーバーレイは document.body 直下
+       * （#app の兄弟）へ append されるため、#app スコープの本 CSS は波及しない。
+       * よってパネルの scroll / select / スライダ / チェック / ファイル選択の
+       * タッチ操作は従来どおり保たれる（body 全体には掛けない＝リセット不要）。
+       */
       #app {
         width: 100vw;
         height: 100vh;
+        /* パン/ダブルタップズーム等のジェスチャ解釈を無効化し pointerdown/move を遅延なく即発火させる。 */
+        touch-action: none;
+        /* タップ時の灰色フラッシュ（タップハイライト光）を消す。 */
+        -webkit-tap-highlight-color: transparent;
+        /* 長押しでのテキスト選択を抑止（継承で canvas にも及ぶ）。 */
+        -webkit-user-select: none;
+        user-select: none;
+        /* iOS の長押しコールアウトメニューを抑止（継承で canvas にも及ぶ）。 */
+        -webkit-touch-callout: none;
       }
       #app canvas {
         display: block;
+        /* touch-action は継承しないため、実際に pointer を受ける canvas 自身にも明示する。 */
+        touch-action: none;
       }
     </style>
   </head>

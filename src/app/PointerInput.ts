@@ -28,6 +28,8 @@ export function clientToWorld(
  *
  * - `pointermove` / `pointerdown`（＝タッチのタップ/ドラッグ含む）→ 画面座標を world 座標へ変換して更新。
  * - `pointerleave` / `pointerout`（canvas＝ウィンドウ外へ出た）→ value を null にし「外へ逃がす」。
+ * - `pointercancel`（着信/システムジェスチャ等でタッチが打ち切られた）→ leave と同じく null 化して
+ *   状態を壊さない（宙に浮いたドラッグを残さず、端retract/逃がし挙動へ穏当に収束させる）。
  *
  * canvas は画面全体を覆う（index.html: #app/canvas とも 100vw/100vh）ため、canvas を離れる
  * ＝ウィンドウを離れる。座標変換は getBoundingClientRect と現在の viewport から毎回算出するので
@@ -59,6 +61,7 @@ export class PointerInput {
     this.canvas.addEventListener("pointerdown", this.onMove);
     this.canvas.addEventListener("pointerleave", this.onLeave);
     this.canvas.addEventListener("pointerout", this.onLeave);
+    this.canvas.addEventListener("pointercancel", this.onLeave);
   }
 
   detach(): void {
@@ -70,6 +73,7 @@ export class PointerInput {
     this.canvas.removeEventListener("pointerdown", this.onMove);
     this.canvas.removeEventListener("pointerleave", this.onLeave);
     this.canvas.removeEventListener("pointerout", this.onLeave);
+    this.canvas.removeEventListener("pointercancel", this.onLeave);
   }
 
   /**
