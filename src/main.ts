@@ -304,7 +304,7 @@ async function bootstrap(): Promise<void> {
   let prevMuted = settings.settings.muted;
   let prevSpeedScale = settings.settings.speedScale;
   // 無効化種別リストは配列なので join したキーで差分判定する（volume ドラッグ等の頻繁通知で無駄に再構築しない）。
-  let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join(" ");
+  let prevAutoDisabledKey = settings.settings.autoDisabledTypes.join("\u0000");
   settings.subscribe((next) => {
     audio.setMasterVolume(next.masterVolume);
     if (next.muted !== prevMuted) {
@@ -325,7 +325,7 @@ async function bootstrap(): Promise<void> {
         resumeFromPlayLimit();
       }
     }
-    const nextAutoDisabledKey = next.autoDisabledTypes.join(" ");
+    const nextAutoDisabledKey = next.autoDisabledTypes.join("\u0000");
     if (nextAutoDisabledKey !== prevAutoDisabledKey) {
       prevAutoDisabledKey = nextAutoDisabledKey;
       autoMode.setDisabledTypes(next.autoDisabledTypes);
