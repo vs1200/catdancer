@@ -52,6 +52,10 @@ export const mouseType: CritterType = {
     };
   },
   sounds: { voice: MOUSE_SQUEAK_ID, move: MOUSE_SCURRY_ID },
+  // [UR4-5] マウス操作モードのネズミは「自動で鳴かず、クリックでのみ鳴く」。追従中は自動SE(走行音 move ＋
+  // 自動チュー voice)を鳴らさず、鳴き声はクリック(onPointerDown)時のみ発火させる。sounds.move はそのまま
+  // 残す（AutoMode 経由の横断ネズミの走行音は本フラグを見ないので不変）。
+  manualFollowMuteAutoSound: true,
   hasTail: true,
   tail: {
     attach: { x: 0.06, y: 0.83 },

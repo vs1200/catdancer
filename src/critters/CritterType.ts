@@ -122,4 +122,14 @@ export interface CritterType {
    * typeId 直書きの分岐でなくデータで表現するための軽い構造化（後続 RF-S1 で InteractionPolicy 化予定）。
    */
   readonly clickWiggle?: WiggleConfig;
+  /**
+   * [UR4-5] マウス操作モードの追従中に「自動SE(走行音/自動鳴き)を一切鳴らさない」種別フラグ。
+   * true の種別（mouse）は {@link import("../modes/manual/FollowManualController")} が追従中の
+   * 自動音を駆動せず（move ループSE の gain=0 固定＋voice スケジューラの自動発火も止める）、
+   * 鳴き声は onPointerDown のクリック時のみ発火する（＝「自動で鳴かず、クリックでのみ鳴く」）。
+   * 省略/false の種別（toys/insect(follow)/任意画像）は従来どおり追従速度に連動して自動音を鳴らす。
+   * AutoMode はこのフラグを参照しないため、auto モードのネズミの走行音は不変（別経路）。typeId 直書き
+   * でなくデータで「mouse のみ」を表現する。
+   */
+  readonly manualFollowMuteAutoSound?: boolean;
 }

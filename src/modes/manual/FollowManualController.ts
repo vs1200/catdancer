@@ -36,6 +36,10 @@ export interface FollowManualControllerDeps {
  * 走行音写像はポインタ追従のピーク速度に合わせた SCURRY_LEVEL_MOUSE_FOLLOW を用いる（sounds が空の
  * foxtail/toys は無音）。
  *
+ * [UR4-5] `manualFollowMuteAutoSound` 種別（mouse）は追従中の自動SE(走行音＋自動チュー)を一切駆動しない
+ * （update で audioCtrl へ present=false を渡し、move ループSE の gain=0 固定＋voice スケジューラ非発火に
+ * する）。鳴き声は onPointerDown のクリック時のみ発火する＝「自動で鳴かず、クリックでのみ鳴く」。
+ *
  * [UR3-6] onPointerDown は種別ごとのクリック挙動を担う（typeId 直書きでなく種別データで分岐）:
  *  - voice(鳴き声)SE があれば鳴らす（mouse→squeak。UR-3 のクリック鳴きをここへ移設）。
  *  - clickWiggle を持つ種別（おもちゃ）は、カーソル追従を止めずに一時的な回転 sway（フリフリ）を
@@ -49,6 +53,12 @@ export class FollowManualController implements ManualController {
   private readonly audioCtrl: CritterAudioController;
   /** [UR3-6] クリックでのフリフリ設定（種別が持てば非 null＝おもちゃ）。無い種別はフリフリしない。 */
   private readonly clickWiggle: WiggleConfig | null;
+  /**
+   * [UR4-5] 追従中に自動SE(走行音/自動チュー)を駆動するか。`manualFollowMuteAutoSound` 種別（mouse）は
+   * false になり、update で audioCtrl へ present=false を渡して自動音を止める（鳴き声はクリック時のみ）。
+   * 省略/false の種別は true＝従来どおり追従速度に連動して自動音を鳴らす。
+   */
+  private readonly drivesAutoAudio: boolean;
   private critter: Critter | null = null;
   private running = false;
   private paused = false;
@@ -71,6 +81,8 @@ export class FollowManualController implements ManualController {
     });
     // クリック挙動は種別データで決める（おもちゃ=フリフリ / mouse=鳴き声のみ＝undefined）。
     this.clickWiggle = type.clickWiggle ?? null;
+    // [UR4-5] mouse は追従中の自動SE(走行音/自動チュー)を鳴らさない（クリック鳴きのみ）。他種別は従来どおり。
+    this.drivesAutoAudio = !(type.manualFollowMuteAutoSound ?? false);
   }
 
   start(): void {
@@ -166,8 +178,10 @@ export class FollowManualController implements ManualController {
     }
     this.critter.update(dtSeconds, this.ctx);
     const speed = Math.hypot(this.critter.state.velocity.x, this.critter.state.velocity.y);
-    // 1 体で常に存在するため present=true 固定。
-    this.audioCtrl.update(speed, dtSeconds, true);
+    // 1 体で常に存在するため通常は present=true。[UR4-5] manualFollowMuteAutoSound 種別(mouse)は
+    // present=false を渡し、自動SE(走行音 move ループの gain=0 固定＋voice スケジューラの自動チュー)を
+    // 一切駆動しない（鳴き声は onPointerDown のクリック時のみ）。
+    this.audioCtrl.update(speed, dtSeconds, this.drivesAutoAudio);
   }
 
   /**
