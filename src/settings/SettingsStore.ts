@@ -4,6 +4,7 @@ import {
   putCritterImage,
   putImage,
 } from "./imageStore";
+import { normalizeManualTypeId } from "./manualTargets";
 import type { AppMode, AppSettings, BackgroundType } from "./settingsData";
 import {
   clampPlayLimitMinutes,
@@ -57,6 +58,7 @@ export class SettingsStore {
       muted: this.state.muted,
       hideCursor: this.state.hideCursor,
       mode: this.state.mode,
+      manualTypeId: this.state.manualTypeId,
       autoSpawnIntervalMs: this.state.autoSpawnIntervalMs,
       autoPlayLimitMinutes: this.state.autoPlayLimitMinutes,
       customCritterImageId: this.state.customCritterImageId,
@@ -183,6 +185,16 @@ export class SettingsStore {
   /** 表示モードを設定する（manual/auto。不正値は manual へ正規化）。 */
   setMode(mode: AppMode): void {
     this.state.mode = normalizeMode(mode);
+    this.commit();
+  }
+
+  /**
+   * [UR-4] マウス操作モードの「操作するもの」種別 id を設定する（永続化＋通知）。
+   * 選択可能な id（MANUAL_TARGETS）以外は mouse へ正規化する。main の購読が
+   * manualMode.setManualType へ実配線し、実行中でも即差し替える（旧 critter/pointer/audio をリークなく破棄）。
+   */
+  setManualTypeId(typeId: string): void {
+    this.state.manualTypeId = normalizeManualTypeId(typeId);
     this.commit();
   }
 

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
+import { INSECT_TYPE_ID } from "../../src/critters/types/insect";
+import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
 import {
   clampPlayLimitMinutes,
   clampSpawnInterval,
@@ -255,6 +258,7 @@ describe("createDefaultSettings", () => {
       muted: DEFAULT_MUTED,
       hideCursor: DEFAULT_HIDE_CURSOR,
       mode: DEFAULT_MODE,
+      manualTypeId: DEFAULT_MANUAL_TYPE_ID,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
@@ -293,6 +297,7 @@ describe("normalizeSettings", () => {
         muted: true,
         hideCursor: true,
         mode: "auto",
+        manualTypeId: FOXTAIL_TYPE_ID,
         autoSpawnIntervalMs: 900,
         autoPlayLimitMinutes: 15,
         customCritterImageId: "critter-1",
@@ -305,6 +310,7 @@ describe("normalizeSettings", () => {
       muted: true,
       hideCursor: true,
       mode: "auto",
+      manualTypeId: FOXTAIL_TYPE_ID,
       autoSpawnIntervalMs: 900,
       autoPlayLimitMinutes: 15,
       customCritterImageId: "critter-1",
@@ -455,6 +461,7 @@ describe("serializeSettings / parseSettings", () => {
       muted: true,
       hideCursor: true,
       mode: "auto" as const,
+      manualTypeId: INSECT_TYPE_ID,
       autoSpawnIntervalMs: 2400,
       autoPlayLimitMinutes: 10,
       customCritterImageId: "critter-xyz",
@@ -475,6 +482,7 @@ describe("serializeSettings / parseSettings", () => {
       "background",
       "customCritterImageId",
       "hideCursor",
+      "manualTypeId",
       "masterVolume",
       "mode",
       "muted",
@@ -500,6 +508,7 @@ describe("serializeSettings / parseSettings", () => {
       muted: DEFAULT_MUTED,
       hideCursor: DEFAULT_HIDE_CURSOR,
       mode: DEFAULT_MODE,
+      manualTypeId: DEFAULT_MANUAL_TYPE_ID,
       autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
       autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
       customCritterImageId: null,
@@ -532,5 +541,18 @@ describe("serializeSettings / parseSettings", () => {
     expect(parseSettings(serializeSettings(off)).hideCursor).toBe(false);
     // hideCursor フィールドを持たない旧 localStorage JSON は false へフォールバック。
     expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').hideCursor).toBe(false);
+  });
+
+  it("manualTypeId 往復: 選択可能値は保持、範囲外/欠損は既定(mouse)へフォールバック", () => {
+    // 選択可能な種別 → serialize → parse で保持。
+    const on = createDefaultSettings();
+    on.manualTypeId = FOXTAIL_TYPE_ID;
+    expect(parseSettings(serializeSettings(on)).manualTypeId).toBe(FOXTAIL_TYPE_ID);
+    // 範囲外の永続値（例: custom）は既定 mouse へ落とす。
+    expect(parseSettings('{"manualTypeId":"custom"}').manualTypeId).toBe(DEFAULT_MANUAL_TYPE_ID);
+    // manualTypeId フィールドを持たない旧 localStorage JSON は既定 mouse へフォールバック。
+    expect(parseSettings('{"masterVolume":0.4,"mode":"auto"}').manualTypeId).toBe(
+      DEFAULT_MANUAL_TYPE_ID,
+    );
   });
 });

@@ -6,6 +6,8 @@
  * 壊れた JSON・未知キー・型不一致に対しては安全にデフォルトへフォールバックする。
  */
 
+import { DEFAULT_MANUAL_TYPE_ID, normalizeManualTypeId } from "./manualTargets";
+
 /** 背景の種類。単色 or ユーザー画像。 */
 export type BackgroundType = "color" | "image";
 
@@ -39,6 +41,12 @@ export interface AppSettings {
   hideCursor: boolean;
   /** 表示モード（manual=マウス操作 / auto=猫用動画）。 */
   mode: AppMode;
+  /**
+   * [UR-4] マウス操作モードで「操作するもの」の種別 id（既定 mouse＝ネズミ）。
+   * 選択可能な値は MANUAL_TARGETS（mouse/foxtail/toys/insect）。範囲外/欠損は mouse へ正規化する。
+   * UR-4 時点は全対象がカーソル追従（プレースホルダ）。固有 manual 挙動は UR-5/UR-6 で差し替える。
+   */
+  manualTypeId: string;
   /** auto モードのオブジェクト出現間隔(ms)。 */
   autoSpawnIntervalMs: number;
   /**
@@ -232,6 +240,7 @@ export function createDefaultSettings(): AppSettings {
     muted: DEFAULT_MUTED,
     hideCursor: DEFAULT_HIDE_CURSOR,
     mode: DEFAULT_MODE,
+    manualTypeId: DEFAULT_MANUAL_TYPE_ID,
     autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
     autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
     customCritterImageId: null,
@@ -251,6 +260,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   muted: DEFAULT_MUTED,
   hideCursor: DEFAULT_HIDE_CURSOR,
   mode: DEFAULT_MODE,
+  manualTypeId: DEFAULT_MANUAL_TYPE_ID,
   autoSpawnIntervalMs: DEFAULT_AUTO_SPAWN_INTERVAL_MS,
   autoPlayLimitMinutes: DEFAULT_AUTO_PLAY_LIMIT_MINUTES,
   customCritterImageId: null,
@@ -285,6 +295,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     muted: normalizeMuted(obj.muted),
     hideCursor: normalizeHideCursor(obj.hideCursor),
     mode: normalizeMode(obj.mode),
+    manualTypeId: normalizeManualTypeId(obj.manualTypeId),
     autoSpawnIntervalMs: clampSpawnInterval(obj.autoSpawnIntervalMs),
     autoPlayLimitMinutes: clampPlayLimitMinutes(obj.autoPlayLimitMinutes),
     customCritterImageId,
@@ -305,6 +316,7 @@ export function serializeSettings(settings: AppSettings): string {
     muted: settings.muted,
     hideCursor: settings.hideCursor,
     mode: settings.mode,
+    manualTypeId: settings.manualTypeId,
     autoSpawnIntervalMs: settings.autoSpawnIntervalMs,
     autoPlayLimitMinutes: settings.autoPlayLimitMinutes,
     customCritterImageId: settings.customCritterImageId,

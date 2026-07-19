@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
+import { MOUSE_TYPE_ID } from "../../src/critters/types/mouse";
+import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
 import { SettingsStore } from "../../src/settings/SettingsStore";
 import { findSpawnPreset, SPAWN_PRESETS } from "../../src/settings/spawnPresets";
 
@@ -82,5 +85,30 @@ describe("SettingsStore.setHideCursor", () => {
     // @ts-expect-error 敵対的入力（非boolでも壊れず false へ正規化されることを検証）。
     store.setHideCursor("yes");
     expect(store.settings.hideCursor).toBe(false);
+  });
+});
+
+describe("SettingsStore.setManualTypeId", () => {
+  it("既定は mouse（ネズミ）", () => {
+    const store = new SettingsStore("test:setManualTypeId:default");
+    expect(store.settings.manualTypeId).toBe(MOUSE_TYPE_ID);
+  });
+
+  it("選択可能な種別は snapshot に反映し、購読者へ通知する", () => {
+    const store = new SettingsStore("test:setManualTypeId:reflect");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.setManualTypeId(FOXTAIL_TYPE_ID);
+    expect(store.settings.manualTypeId).toBe(FOXTAIL_TYPE_ID);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ manualTypeId: FOXTAIL_TYPE_ID }),
+    );
+  });
+
+  it("選択不能な id は既定(mouse)へ正規化する", () => {
+    const store = new SettingsStore("test:setManualTypeId:normalize");
+    store.setManualTypeId("custom");
+    expect(store.settings.manualTypeId).toBe(DEFAULT_MANUAL_TYPE_ID);
   });
 });
