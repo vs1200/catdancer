@@ -27,6 +27,7 @@ import { PlayLimitTimer } from "./modes/PlayLimitTimer";
 import { getCritterImage } from "./settings/imageStore";
 import { SettingsStore } from "./settings/SettingsStore";
 import type { AppMode } from "./settings/settingsData";
+import { showBootstrapFailure } from "./ui/BootstrapFallback";
 import { OptionsButton } from "./ui/OptionsButton";
 import { OptionsPanel } from "./ui/OptionsPanel";
 import { PlayLimitOverlay } from "./ui/PlayLimitOverlay";
@@ -525,4 +526,13 @@ async function bootstrap(): Promise<void> {
 
 bootstrap().catch((error: unknown) => {
   console.error("catdancer の起動に失敗しました:", error);
+  // 画面が真っ白のままにならないよう、穏やかなフォールバックメッセージを表示する。
+  // #app が無い（マウント先未検出）ケースは document.body で拾う。フォールバック描画自体が
+  // 失敗しても catch ハンドラが再 throw しないよう握りつぶす。
+  try {
+    const fallbackContainer = document.querySelector<HTMLElement>("#app") ?? document.body;
+    showBootstrapFailure(fallbackContainer);
+  } catch (fallbackError) {
+    console.error("フォールバック表示にも失敗しました:", fallbackError);
+  }
 });
