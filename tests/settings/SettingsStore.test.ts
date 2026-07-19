@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
 import { CUSTOM_CRITTER_TYPE_ID } from "../../src/critters/types/imageCritter";
 import { MOUSE_TYPE_ID } from "../../src/critters/types/mouse";
+import { TOYS_TYPE_ID } from "../../src/critters/types/toys";
 import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
 import { SettingsStore } from "../../src/settings/SettingsStore";
 import { findSpawnPreset, SPAWN_PRESETS } from "../../src/settings/spawnPresets";
@@ -150,5 +151,61 @@ describe("SettingsStore.setInsectManualPattern", () => {
     // @ts-expect-error 敵対的入力（異常型でも例外を投げず click へ落ちる）。
     expect(() => store.setInsectManualPattern(true)).not.toThrow();
     expect(store.settings.insectManualPattern).toBe("click");
+  });
+});
+
+describe("SettingsStore.setManualObjectScale / setAutoObjectScale", () => {
+  it("既定は manual/auto とも全キー 1.0", () => {
+    const store = new SettingsStore("test:objectScale:default");
+    expect(store.settings.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.0);
+    expect(store.settings.manualObjectScales[CUSTOM_CRITTER_TYPE_ID]).toBe(1.0);
+    expect(store.settings.autoObjectScales[MOUSE_TYPE_ID]).toBe(1.0);
+  });
+
+  it("setManualObjectScale は該当キーのみ更新し、他キー/autoレコードは不変（commit/notify 1回）", () => {
+    const store = new SettingsStore("test:objectScale:manual-only");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.setManualObjectScale(MOUSE_TYPE_ID, 1.6);
+    const snap = store.settings;
+    expect(snap.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.6);
+    // 他の manual キーは 1.0 のまま、auto レコードも触られない。
+    expect(snap.manualObjectScales[FOXTAIL_TYPE_ID]).toBe(1.0);
+    expect(snap.autoObjectScales[MOUSE_TYPE_ID]).toBe(1.0);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        manualObjectScales: expect.objectContaining({ [MOUSE_TYPE_ID]: 1.6 }),
+      }),
+    );
+  });
+
+  it("setAutoObjectScale は該当キーのみ更新し、manualレコードは不変", () => {
+    const store = new SettingsStore("test:objectScale:auto-only");
+    store.setAutoObjectScale(FOXTAIL_TYPE_ID, 0.6);
+    const snap = store.settings;
+    expect(snap.autoObjectScales[FOXTAIL_TYPE_ID]).toBe(0.6);
+    expect(snap.autoObjectScales[MOUSE_TYPE_ID]).toBe(1.0);
+    expect(snap.manualObjectScales[FOXTAIL_TYPE_ID]).toBe(1.0);
+  });
+
+  it("範囲外はクランプ、非有限/0以下は既定 1.0 へ正規化する（例外を投げない）", () => {
+    const store = new SettingsStore("test:objectScale:normalize");
+    store.setManualObjectScale(MOUSE_TYPE_ID, 99);
+    expect(store.settings.manualObjectScales[MOUSE_TYPE_ID]).toBe(2.0); // MAX へクランプ
+    store.setManualObjectScale(MOUSE_TYPE_ID, 0);
+    expect(store.settings.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.0); // 0以下→既定
+    // @ts-expect-error 敵対的入力（異常型でも例外を投げず既定 1.0 へ）。
+    expect(() => store.setAutoObjectScale(TOYS_TYPE_ID, true)).not.toThrow();
+    expect(store.settings.autoObjectScales[TOYS_TYPE_ID]).toBe(1.0);
+  });
+
+  it("スナップショットのレコードは内部 state から切り離されている（直接改変が漏れない）", () => {
+    const store = new SettingsStore("test:objectScale:snapshot-copy");
+    store.setManualObjectScale(MOUSE_TYPE_ID, 1.6);
+    const snap = store.settings;
+    snap.manualObjectScales[MOUSE_TYPE_ID] = 0.5;
+    // 次のスナップショットには漏れない（getter が浅コピーを返す）。
+    expect(store.settings.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.6);
   });
 });

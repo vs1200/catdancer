@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
 import { CUSTOM_CRITTER_TYPE_ID } from "../../src/critters/types/imageCritter";
 import { INSECT_TYPE_ID } from "../../src/critters/types/insect";
+import { MOUSE_TYPE_ID } from "../../src/critters/types/mouse";
+import { TOYS_TYPE_ID } from "../../src/critters/types/toys";
 import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
 import {
+  AUTO_OBJECT_SCALE_KEYS,
   clampPlayLimitMinutes,
   clampSpawnInterval,
   clampVolume,
@@ -18,10 +21,14 @@ import {
   DEFAULT_MASTER_VOLUME,
   DEFAULT_MODE,
   DEFAULT_MUTED,
+  DEFAULT_OBJECT_SCALE,
+  MANUAL_OBJECT_SCALE_KEYS,
   MAX_AUTO_PLAY_LIMIT_MINUTES,
   MAX_AUTO_SPAWN_INTERVAL_MS,
+  MAX_OBJECT_SCALE,
   MAX_SPEED_SCALE,
   MIN_AUTO_SPAWN_INTERVAL_MS,
+  MIN_OBJECT_SCALE,
   MIN_SPEED_SCALE,
   normalizeAutoDisabledTypes,
   normalizeHexColor,
@@ -29,11 +36,29 @@ import {
   normalizeInsectManualPattern,
   normalizeMode,
   normalizeMuted,
+  normalizeObjectScale,
+  normalizeObjectScales,
   normalizeSettings,
   normalizeSpeedScale,
+  OBJECT_SCALE_OPTIONS,
   parseSettings,
   serializeSettings,
 } from "../../src/settings/settingsData";
+
+/** テスト内で使う「全キー既定 1.0」の完全レコード（createDefaultSettings 期待値の補助）。 */
+const DEFAULT_MANUAL_OBJECT_SCALES: Record<string, number> = {
+  [MOUSE_TYPE_ID]: 1.0,
+  [FOXTAIL_TYPE_ID]: 1.0,
+  [TOYS_TYPE_ID]: 1.0,
+  [INSECT_TYPE_ID]: 1.0,
+  [CUSTOM_CRITTER_TYPE_ID]: 1.0,
+};
+const DEFAULT_AUTO_OBJECT_SCALES: Record<string, number> = {
+  [MOUSE_TYPE_ID]: 1.0,
+  [FOXTAIL_TYPE_ID]: 1.0,
+  [TOYS_TYPE_ID]: 1.0,
+  [INSECT_TYPE_ID]: 1.0,
+};
 
 describe("normalizeHexColor", () => {
   it("6桁 hex を小文字で受理する", () => {
@@ -365,6 +390,139 @@ describe("normalizeSpeedScale", () => {
   });
 });
 
+describe("normalizeObjectScale", () => {
+  it("範囲内はそのまま（プリセット値・境界含む）", () => {
+    expect(normalizeObjectScale(0.6)).toBe(0.6);
+    expect(normalizeObjectScale(1.0)).toBe(1.0);
+    expect(normalizeObjectScale(1.6)).toBe(1.6);
+    expect(normalizeObjectScale(MIN_OBJECT_SCALE)).toBe(MIN_OBJECT_SCALE);
+    expect(normalizeObjectScale(MAX_OBJECT_SCALE)).toBe(MAX_OBJECT_SCALE);
+  });
+
+  it("範囲外は下限/上限へクランプ", () => {
+    expect(normalizeObjectScale(0.01)).toBe(MIN_OBJECT_SCALE);
+    expect(normalizeObjectScale(MIN_OBJECT_SCALE - 0.1)).toBe(MIN_OBJECT_SCALE);
+    expect(normalizeObjectScale(99)).toBe(MAX_OBJECT_SCALE);
+    expect(normalizeObjectScale(MAX_OBJECT_SCALE + 0.5)).toBe(MAX_OBJECT_SCALE);
+  });
+
+  it("0以下は既定(1.0)へ（>0 のみ受理）", () => {
+    expect(normalizeObjectScale(0)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(-1)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(DEFAULT_OBJECT_SCALE).toBe(1.0);
+  });
+
+  it("数値化できない/非有限/欠損は既定(1.0)へ", () => {
+    expect(normalizeObjectScale(Number.NaN)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(Number.POSITIVE_INFINITY)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(undefined)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(null)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale("abc")).toBe(DEFAULT_OBJECT_SCALE);
+  });
+
+  it("数値文字列は解釈する", () => {
+    expect(normalizeObjectScale("1.3")).toBe(1.3);
+    expect(normalizeObjectScale("  0.8  ")).toBe(0.8);
+  });
+
+  it("型不一致(boolean/null/空文字/空白/配列/オブジェクト)は既定(1.0)へ", () => {
+    // 破損/改竄 localStorage 由来の異常型が Number() 化けで誤ったサイズにならないことの契約実証。
+    expect(normalizeObjectScale(true)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(false)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(null)).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale("")).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(" ")).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale([])).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale([1.5])).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale({})).toBe(DEFAULT_OBJECT_SCALE);
+  });
+
+  it("Symbol/BigInt は例外を投げず既定(1.0)へ", () => {
+    expect(() => normalizeObjectScale(Symbol("x"))).not.toThrow();
+    expect(normalizeObjectScale(Symbol("x"))).toBe(DEFAULT_OBJECT_SCALE);
+    expect(normalizeObjectScale(2n)).toBe(DEFAULT_OBJECT_SCALE);
+  });
+
+  it("UI 選択肢は全て [MIN,MAX] 内で標準 1.0 を含む", () => {
+    for (const opt of OBJECT_SCALE_OPTIONS) {
+      expect(opt.value).toBeGreaterThanOrEqual(MIN_OBJECT_SCALE);
+      expect(opt.value).toBeLessThanOrEqual(MAX_OBJECT_SCALE);
+    }
+    expect(OBJECT_SCALE_OPTIONS.some((o) => o.value === 1.0)).toBe(true);
+    // 各 value は normalizeObjectScale を通しても不変（プリセット外へ黙って化けない）。
+    for (const opt of OBJECT_SCALE_OPTIONS) {
+      expect(normalizeObjectScale(opt.value)).toBe(opt.value);
+    }
+  });
+});
+
+describe("normalizeObjectScales", () => {
+  it("固定キー集合を反復し各キーを正規化する（有効値は保持・範囲外はクランプ）", () => {
+    expect(
+      normalizeObjectScales(
+        { [MOUSE_TYPE_ID]: 1.6, [FOXTAIL_TYPE_ID]: 0.6, [TOYS_TYPE_ID]: 99, [INSECT_TYPE_ID]: 0.8 },
+        AUTO_OBJECT_SCALE_KEYS,
+      ),
+    ).toEqual({
+      [MOUSE_TYPE_ID]: 1.6,
+      [FOXTAIL_TYPE_ID]: 0.6,
+      [TOYS_TYPE_ID]: MAX_OBJECT_SCALE, // 99 → クランプ
+      [INSECT_TYPE_ID]: 0.8,
+    });
+  });
+
+  it("欠損キーは 1.0 で埋める（完全レコードを返す）", () => {
+    expect(normalizeObjectScales({ [MOUSE_TYPE_ID]: 1.3 }, AUTO_OBJECT_SCALE_KEYS)).toEqual({
+      [MOUSE_TYPE_ID]: 1.3,
+      [FOXTAIL_TYPE_ID]: 1.0,
+      [TOYS_TYPE_ID]: 1.0,
+      [INSECT_TYPE_ID]: 1.0,
+    });
+  });
+
+  it("未知キー（keys に無いもの）は読まず自動的に落とす", () => {
+    const out = normalizeObjectScales(
+      { [MOUSE_TYPE_ID]: 1.3, [CUSTOM_CRITTER_TYPE_ID]: 2.0, bogus: 1.9 },
+      AUTO_OBJECT_SCALE_KEYS,
+    );
+    // custom / bogus は AUTO キー集合に無いので結果に現れない。
+    expect(Object.keys(out).sort()).toEqual([...AUTO_OBJECT_SCALE_KEYS].sort());
+    expect(out[CUSTOM_CRITTER_TYPE_ID]).toBeUndefined();
+    expect(out.bogus).toBeUndefined();
+  });
+
+  it("非オブジェクト raw（null/配列/数値/文字列）は全キー 1.0 の完全レコード", () => {
+    for (const raw of [null, undefined, 42, "x", [], [1, 2]]) {
+      expect(normalizeObjectScales(raw, AUTO_OBJECT_SCALE_KEYS)).toEqual(
+        DEFAULT_AUTO_OBJECT_SCALES,
+      );
+    }
+  });
+
+  it("異常値キー（boolean/null/配列/Symbol）は 1.0 に落とし例外を投げない", () => {
+    const raw: Record<string, unknown> = {
+      [MOUSE_TYPE_ID]: true,
+      [FOXTAIL_TYPE_ID]: null,
+      [TOYS_TYPE_ID]: [1.5],
+      [INSECT_TYPE_ID]: Symbol("x"),
+    };
+    expect(() => normalizeObjectScales(raw, AUTO_OBJECT_SCALE_KEYS)).not.toThrow();
+    expect(normalizeObjectScales(raw, AUTO_OBJECT_SCALE_KEYS)).toEqual(DEFAULT_AUTO_OBJECT_SCALES);
+  });
+
+  it("MANUAL キー集合は custom を含み、AUTO キー集合は含まない", () => {
+    expect(MANUAL_OBJECT_SCALE_KEYS).toContain(CUSTOM_CRITTER_TYPE_ID);
+    expect(AUTO_OBJECT_SCALE_KEYS).not.toContain(CUSTOM_CRITTER_TYPE_ID);
+    // manual は 5 種（mouse/foxtail/toys/insect/custom）、auto は 4 種。
+    expect([...MANUAL_OBJECT_SCALE_KEYS].sort()).toEqual(
+      [MOUSE_TYPE_ID, FOXTAIL_TYPE_ID, TOYS_TYPE_ID, INSECT_TYPE_ID, CUSTOM_CRITTER_TYPE_ID].sort(),
+    );
+    expect([...AUTO_OBJECT_SCALE_KEYS].sort()).toEqual(
+      [MOUSE_TYPE_ID, FOXTAIL_TYPE_ID, TOYS_TYPE_ID, INSECT_TYPE_ID].sort(),
+    );
+  });
+});
+
 describe("createDefaultSettings", () => {
   it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし / manual速さ 1.0 / auto速さ 1.8", () => {
     const s = createDefaultSettings();
@@ -382,6 +540,8 @@ describe("createDefaultSettings", () => {
       autoDisabledTypes: [],
       manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
       autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
+      manualObjectScales: DEFAULT_MANUAL_OBJECT_SCALES,
+      autoObjectScales: DEFAULT_AUTO_OBJECT_SCALES,
     });
     expect(DEFAULT_INSECT_MANUAL_PATTERN).toBe("click");
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
@@ -402,10 +562,16 @@ describe("createDefaultSettings", () => {
     expect(a).not.toBe(b);
     expect(a.background).not.toBe(b.background);
     expect(a.autoDisabledTypes).not.toBe(b.autoDisabledTypes);
+    expect(a.manualObjectScales).not.toBe(b.manualObjectScales);
+    expect(a.autoObjectScales).not.toBe(b.autoObjectScales);
     a.background.color = "#000000";
     a.autoDisabledTypes.push("mouse");
+    a.manualObjectScales[MOUSE_TYPE_ID] = 2.0;
+    a.autoObjectScales[TOYS_TYPE_ID] = 0.6;
     expect(b.background.color).toBe(DEFAULT_BACKGROUND_COLOR);
     expect(b.autoDisabledTypes).toEqual([]);
+    expect(b.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.0);
+    expect(b.autoObjectScales[TOYS_TYPE_ID]).toBe(1.0);
   });
 });
 
@@ -426,6 +592,19 @@ describe("normalizeSettings", () => {
         autoDisabledTypes: ["insect", "toys"],
         manualSpeedScale: 1.4,
         autoSpeedScale: 2.2,
+        manualObjectScales: {
+          [MOUSE_TYPE_ID]: 1.6,
+          [FOXTAIL_TYPE_ID]: 0.6,
+          [TOYS_TYPE_ID]: 1.3,
+          [INSECT_TYPE_ID]: 0.8,
+          [CUSTOM_CRITTER_TYPE_ID]: 2.0,
+        },
+        autoObjectScales: {
+          [MOUSE_TYPE_ID]: 0.8,
+          [FOXTAIL_TYPE_ID]: 1.3,
+          [TOYS_TYPE_ID]: 1.6,
+          [INSECT_TYPE_ID]: 0.6,
+        },
       }),
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
@@ -441,6 +620,19 @@ describe("normalizeSettings", () => {
       autoDisabledTypes: ["insect", "toys"],
       manualSpeedScale: 1.4,
       autoSpeedScale: 2.2,
+      manualObjectScales: {
+        [MOUSE_TYPE_ID]: 1.6,
+        [FOXTAIL_TYPE_ID]: 0.6,
+        [TOYS_TYPE_ID]: 1.3,
+        [INSECT_TYPE_ID]: 0.8,
+        [CUSTOM_CRITTER_TYPE_ID]: 2.0,
+      },
+      autoObjectScales: {
+        [MOUSE_TYPE_ID]: 0.8,
+        [FOXTAIL_TYPE_ID]: 1.3,
+        [TOYS_TYPE_ID]: 1.6,
+        [INSECT_TYPE_ID]: 0.6,
+      },
     });
   });
 
@@ -624,6 +816,32 @@ describe("normalizeSettings", () => {
     expect(partial.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
   });
 
+  it("[UR4-2] manual/autoObjectScales は欠損で全キー1.0、未知キー無視、有効値保持・範囲外クランプ", () => {
+    // 欠損は全キー既定 1.0 の完全レコード。
+    expect(normalizeSettings({}).manualObjectScales).toEqual(DEFAULT_MANUAL_OBJECT_SCALES);
+    expect(normalizeSettings({}).autoObjectScales).toEqual(DEFAULT_AUTO_OBJECT_SCALES);
+    // 有効値は保持し、欠損キーは 1.0 で埋め、未知キー(bogus)は落とす。範囲外はクランプ。
+    const s = normalizeSettings({
+      manualObjectScales: { [MOUSE_TYPE_ID]: 1.6, [FOXTAIL_TYPE_ID]: 99, bogus: 1.9 },
+      autoObjectScales: { [INSECT_TYPE_ID]: 0.8 },
+    });
+    expect(s.manualObjectScales).toEqual({
+      [MOUSE_TYPE_ID]: 1.6,
+      [FOXTAIL_TYPE_ID]: MAX_OBJECT_SCALE,
+      [TOYS_TYPE_ID]: 1.0,
+      [INSECT_TYPE_ID]: 1.0,
+      [CUSTOM_CRITTER_TYPE_ID]: 1.0,
+    });
+    expect(s.autoObjectScales).toEqual({
+      [MOUSE_TYPE_ID]: 1.0,
+      [FOXTAIL_TYPE_ID]: 1.0,
+      [TOYS_TYPE_ID]: 1.0,
+      [INSECT_TYPE_ID]: 0.8,
+    });
+    // custom は auto には含まれない（動画モードに出ないため）。
+    expect(s.autoObjectScales[CUSTOM_CRITTER_TYPE_ID]).toBeUndefined();
+  });
+
   it("数値フィールドの型不一致(破損/改竄 localStorage 由来)は全て既定へ正規化する", () => {
     // 破損/改竄/旧版由来の永続値を想定。boolean/null/空文字/配列/オブジェクトが
     // Number() 化けで誤った値（音量暴発・spawn 頻発・遊びすぎ制限の誤ON）にならないことの契約実証。
@@ -633,12 +851,17 @@ describe("normalizeSettings", () => {
       autoSpawnIntervalMs: null,
       manualSpeedScale: [],
       autoSpeedScale: {},
+      // 非オブジェクトのサイズレコードは全キー 1.0 の完全レコードへフォールバック（throw しない）。
+      manualObjectScales: true,
+      autoObjectScales: 42,
     });
     expect(s.masterVolume).toBe(DEFAULT_MASTER_VOLUME);
     expect(s.autoPlayLimitMinutes).toBe(DEFAULT_AUTO_PLAY_LIMIT_MINUTES);
     expect(s.autoSpawnIntervalMs).toBe(DEFAULT_AUTO_SPAWN_INTERVAL_MS);
     expect(s.manualSpeedScale).toBe(DEFAULT_MANUAL_SPEED_SCALE);
     expect(s.autoSpeedScale).toBe(DEFAULT_AUTO_SPEED_SCALE);
+    expect(s.manualObjectScales).toEqual(DEFAULT_MANUAL_OBJECT_SCALES);
+    expect(s.autoObjectScales).toEqual(DEFAULT_AUTO_OBJECT_SCALES);
   });
 });
 
@@ -658,6 +881,19 @@ describe("serializeSettings / parseSettings", () => {
       autoDisabledTypes: ["foxtail", "insect"],
       manualSpeedScale: 1.8,
       autoSpeedScale: 2.2,
+      manualObjectScales: {
+        [MOUSE_TYPE_ID]: 1.6,
+        [FOXTAIL_TYPE_ID]: 0.6,
+        [TOYS_TYPE_ID]: 1.3,
+        [INSECT_TYPE_ID]: 0.8,
+        [CUSTOM_CRITTER_TYPE_ID]: 2.0,
+      },
+      autoObjectScales: {
+        [MOUSE_TYPE_ID]: 0.8,
+        [FOXTAIL_TYPE_ID]: 1.3,
+        [TOYS_TYPE_ID]: 1.6,
+        [INSECT_TYPE_ID]: 0.6,
+      },
     };
     const restored = parseSettings(serializeSettings(original));
     expect(restored).toEqual(original);
@@ -668,6 +904,7 @@ describe("serializeSettings / parseSettings", () => {
     const parsed = JSON.parse(json) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual([
       "autoDisabledTypes",
+      "autoObjectScales",
       "autoPlayLimitMinutes",
       "autoSpawnIntervalMs",
       "autoSpeedScale",
@@ -675,6 +912,7 @@ describe("serializeSettings / parseSettings", () => {
       "customCritterImageId",
       "hideCursor",
       "insectManualPattern",
+      "manualObjectScales",
       "manualSpeedScale",
       "manualTypeId",
       "masterVolume",
@@ -709,7 +947,24 @@ describe("serializeSettings / parseSettings", () => {
       autoDisabledTypes: [],
       manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
       autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
+      manualObjectScales: DEFAULT_MANUAL_OBJECT_SCALES,
+      autoObjectScales: DEFAULT_AUTO_OBJECT_SCALES,
     });
+  });
+
+  it("[UR4-2] objectScales 往復: per-type 値を両レコード保存・復元し、旧 JSON は全キー1.0（後方互換）", () => {
+    const on = createDefaultSettings();
+    on.manualObjectScales[MOUSE_TYPE_ID] = 1.6;
+    on.manualObjectScales[CUSTOM_CRITTER_TYPE_ID] = 0.6;
+    on.autoObjectScales[TOYS_TYPE_ID] = 1.3;
+    const restored = parseSettings(serializeSettings(on));
+    expect(restored.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.6);
+    expect(restored.manualObjectScales[CUSTOM_CRITTER_TYPE_ID]).toBe(0.6);
+    expect(restored.autoObjectScales[TOYS_TYPE_ID]).toBe(1.3);
+    // フィールドを持たない旧 localStorage JSON は全キー 1.0 の完全レコードへフォールバック。
+    const legacy = parseSettings('{"masterVolume":0.4,"mode":"auto"}');
+    expect(legacy.manualObjectScales).toEqual(DEFAULT_MANUAL_OBJECT_SCALES);
+    expect(legacy.autoObjectScales).toEqual(DEFAULT_AUTO_OBJECT_SCALES);
   });
 
   it("muted 往復: true/false ともに保持し、フィールド無しの旧 JSON は false（後方互換）", () => {

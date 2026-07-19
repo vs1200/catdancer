@@ -18,6 +18,7 @@ import {
   normalizeInsectManualPattern,
   normalizeMode,
   normalizeMuted,
+  normalizeObjectScale,
   normalizeSpeedScale,
   parseSettings,
   serializeSettings,
@@ -69,6 +70,8 @@ export class SettingsStore {
       autoDisabledTypes: [...this.state.autoDisabledTypes],
       manualSpeedScale: this.state.manualSpeedScale,
       autoSpeedScale: this.state.autoSpeedScale,
+      manualObjectScales: { ...this.state.manualObjectScales },
+      autoObjectScales: { ...this.state.autoObjectScales },
     };
   }
 
@@ -234,6 +237,26 @@ export class SettingsStore {
    */
   setAutoSpeedScale(value: number): void {
     this.state.autoSpeedScale = normalizeSpeedScale(value, DEFAULT_AUTO_SPEED_SCALE);
+    this.commit();
+  }
+
+  /**
+   * [UR4-2] マウス操作モードの指定種別の表示サイズ倍率を設定する（該当キーのみ更新。永続化＋通知）。
+   * 値は {@link normalizeObjectScale}（[MIN,MAX] クランプ／非有限・0以下・型不一致は既定 1.0）で正規化する。
+   * auto とは独立。main の購読が現在その種別を操作中なら manualMode.rebuildCurrent() で 1 体へ即反映する。
+   */
+  setManualObjectScale(typeId: string, value: number): void {
+    this.state.manualObjectScales[typeId] = normalizeObjectScale(value);
+    this.commit();
+  }
+
+  /**
+   * [UR4-2] 動画モード(auto)の指定種別の表示サイズ倍率を設定する（該当キーのみ更新。永続化＋通知）。
+   * 値は {@link normalizeObjectScale} で正規化する。manual とは独立。main の購読が
+   * autoMode.setSizeMultipliers へ実配線し、以後 spawn される該当種別の表示サイズへ反映される。
+   */
+  setAutoObjectScale(typeId: string, value: number): void {
+    this.state.autoObjectScales[typeId] = normalizeObjectScale(value);
     this.commit();
   }
 

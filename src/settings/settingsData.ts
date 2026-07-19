@@ -6,6 +6,11 @@
  * 壊れた JSON・未知キー・型不一致に対しては安全にデフォルトへフォールバックする。
  */
 
+import { FOXTAIL_TYPE_ID } from "../critters/types/foxtail";
+import { CUSTOM_CRITTER_TYPE_ID } from "../critters/types/imageCritter";
+import { INSECT_TYPE_ID } from "../critters/types/insect";
+import { MOUSE_TYPE_ID } from "../critters/types/mouse";
+import { TOYS_TYPE_ID } from "../critters/types/toys";
 import { DEFAULT_MANUAL_TYPE_ID, normalizeManualTypeId } from "./manualTargets";
 
 /** 背景の種類。単色 or ユーザー画像。 */
@@ -90,6 +95,19 @@ export interface AppSettings {
    * 旧単一 speedScale からの migration では auto はこの既定(1.8)を採る（旧storageでも底上げ）。
    */
   autoSpeedScale: number;
+  /**
+   * [UR4-2] マウス操作モードの種別ごとの表示サイズ倍率（種別 id → 倍率）。既定は全キー 1.0。
+   * キー集合は {@link MANUAL_OBJECT_SCALE_KEYS}（mouse/foxtail/toys/insect/custom）で固定し、
+   * spawn 時に UR4-1 の viewport sizeScale の上へ乗せる純増倍率。auto とは独立に設定・永続化する。
+   * 欠損/異常キーは 1.0、未知キーは落とす（{@link normalizeObjectScales}）。
+   */
+  manualObjectScales: Record<string, number>;
+  /**
+   * [UR4-2] 動画モード(auto)の種別ごとの表示サイズ倍率（種別 id → 倍率）。既定は全キー 1.0。
+   * キー集合は {@link AUTO_OBJECT_SCALE_KEYS}（mouse/foxtail/toys/insect。custom は動画に出ないため除外）。
+   * spawn 時に UR4-1 の viewport sizeScale の上へ乗せる純増倍率。manual とは独立に設定・永続化する。
+   */
+  autoObjectScales: Record<string, number>;
 }
 
 /** 既定の背景色（単色 白）。 */
@@ -129,6 +147,37 @@ export const MIN_SPEED_SCALE = 0.3;
 /** 動きの速さ倍率の上限（永続値の暴走ガード）。manual/auto 共通。 */
 export const MAX_SPEED_SCALE = 2.5;
 
+/** [UR4-2] オブジェクト表示サイズ倍率の既定値（1.0＝UR4-1 の viewport sizeScale のみ＝従来同一）。 */
+export const DEFAULT_OBJECT_SCALE = 1.0;
+/** [UR4-2] オブジェクト表示サイズ倍率の下限（永続値の暴走ガード）。 */
+export const MIN_OBJECT_SCALE = 0.5;
+/** [UR4-2] オブジェクト表示サイズ倍率の上限（永続値の暴走ガード）。 */
+export const MAX_OBJECT_SCALE = 2.0;
+
+/**
+ * [UR4-2] マウス操作モードでサイズ倍率を持つ種別 id 集合（＝MANUAL_TARGETS の id と一致）。
+ * この配列が「per-type サイズ倍率レコードのキー」の単一の真実源になり、normalize/serialize が
+ * このキー集合を反復する（未知キーを落とし、欠損キーを既定 1.0 で埋める＝round-trip 安定）。
+ */
+export const MANUAL_OBJECT_SCALE_KEYS: readonly string[] = [
+  MOUSE_TYPE_ID,
+  FOXTAIL_TYPE_ID,
+  TOYS_TYPE_ID,
+  INSECT_TYPE_ID,
+  CUSTOM_CRITTER_TYPE_ID,
+];
+
+/**
+ * [UR4-2] 動画モード(auto)でサイズ倍率を持つ種別 id 集合。custom（任意画像）は動画モードに出ないため
+ * 除外する。manual 同様この集合が per-type サイズ倍率レコードのキーの単一の真実源になる。
+ */
+export const AUTO_OBJECT_SCALE_KEYS: readonly string[] = [
+  MOUSE_TYPE_ID,
+  FOXTAIL_TYPE_ID,
+  TOYS_TYPE_ID,
+  INSECT_TYPE_ID,
+];
+
 /** [UR3-5] 虫の動きパターン UI 選択肢 1 件。value は正規化許可集合、label は UI 表示名。 */
 export interface InsectManualPatternOption {
   value: InsectManualPattern;
@@ -167,6 +216,20 @@ export const AUTO_SPEED_SCALE_OPTIONS: readonly SpeedScaleOption[] = [
   { label: "標準", value: 1.8 },
   { label: "はやい", value: 2.2 },
   { label: "とてもはやい", value: 2.5 },
+];
+
+/**
+ * [UR4-2] UI（マウス操作/動画モード各タブの「大きさ」）に並べるオブジェクトサイズ倍率の選択肢。
+ * value は [MIN_OBJECT_SCALE, MAX_OBJECT_SCALE] 内で、標準=1.0 を必ず含む（既定＝従来の見え）。
+ * manual/auto 共通の選択肢（SpeedScaleOption と同型を再利用）。復元時は最近傍で選ぶ（syncSpeed 流用）。
+ */
+export const OBJECT_SCALE_OPTIONS: readonly SpeedScaleOption[] = [
+  { label: "小さめ", value: 0.6 },
+  { label: "やや小さめ", value: 0.8 },
+  { label: "標準", value: 1.0 },
+  { label: "やや大きめ", value: 1.3 },
+  { label: "大きめ", value: 1.6 },
+  { label: "とても大きめ", value: 2.0 },
 ];
 
 /** `#rgb` / `#rrggbb`（大小文字可）を受理する正規表現。 */
@@ -320,6 +383,38 @@ export function normalizeSpeedScale(
   return n < MIN_SPEED_SCALE ? MIN_SPEED_SCALE : n > MAX_SPEED_SCALE ? MAX_SPEED_SCALE : n;
 }
 
+/**
+ * [UR4-2] オブジェクト表示サイズ倍率を正規化する。有限数・数値文字列のみ受理し、>0 なら
+ * [MIN_OBJECT_SCALE, MAX_OBJECT_SCALE] にクランプ。型不一致（boolean/null/配列/オブジェクト/
+ * 空文字/Symbol/BigInt）・非有限・0以下・欠損は既定 {@link DEFAULT_OBJECT_SCALE}(1.0) へフォールバックする
+ * （normalizeSpeedScale と同流儀。破損/改竄 localStorage 由来の異常入力でも例外を投げない）。
+ */
+export function normalizeObjectScale(value: unknown): number {
+  const n = coerceFiniteNumber(value);
+  if (n === null || n <= 0) {
+    return DEFAULT_OBJECT_SCALE;
+  }
+  return n < MIN_OBJECT_SCALE ? MIN_OBJECT_SCALE : n > MAX_OBJECT_SCALE ? MAX_OBJECT_SCALE : n;
+}
+
+/**
+ * [UR4-2] 種別ごとのサイズ倍率レコード（種別 id → 倍率）を、固定キー集合 keys を反復して正規化する。
+ * 各キーは {@link normalizeObjectScale}(asRecord(raw)[key]) で埋めるため、欠損キー/異常値は 1.0 になり、
+ * 未知キー（keys に無いもの）は読まず自動的に落ちる。非オブジェクト raw（null/配列/数値等）でも
+ * asRecord が {} を返すので全キー 1.0 の完全レコードになる（round-trip 安定・キー集合が真実源）。
+ */
+export function normalizeObjectScales(
+  raw: unknown,
+  keys: readonly string[],
+): Record<string, number> {
+  const obj = asRecord(raw);
+  const out: Record<string, number> = {};
+  for (const key of keys) {
+    out[key] = normalizeObjectScale(obj[key]);
+  }
+  return out;
+}
+
 /** デフォルト設定を新規生成する（呼び出しごとに独立したオブジェクト）。 */
 export function createDefaultSettings(): AppSettings {
   return {
@@ -340,6 +435,8 @@ export function createDefaultSettings(): AppSettings {
     autoDisabledTypes: [],
     manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
     autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
+    manualObjectScales: normalizeObjectScales({}, MANUAL_OBJECT_SCALE_KEYS),
+    autoObjectScales: normalizeObjectScales({}, AUTO_OBJECT_SCALE_KEYS),
   };
 }
 
@@ -362,6 +459,14 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   autoDisabledTypes: Object.freeze([] as string[]) as string[],
   manualSpeedScale: DEFAULT_MANUAL_SPEED_SCALE,
   autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
+  manualObjectScales: Object.freeze(normalizeObjectScales({}, MANUAL_OBJECT_SCALE_KEYS)) as Record<
+    string,
+    number
+  >,
+  autoObjectScales: Object.freeze(normalizeObjectScales({}, AUTO_OBJECT_SCALE_KEYS)) as Record<
+    string,
+    number
+  >,
 }) as AppSettings;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -415,6 +520,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
     autoDisabledTypes: normalizeAutoDisabledTypes(obj.autoDisabledTypes),
     manualSpeedScale,
     autoSpeedScale,
+    manualObjectScales: normalizeObjectScales(obj.manualObjectScales, MANUAL_OBJECT_SCALE_KEYS),
+    autoObjectScales: normalizeObjectScales(obj.autoObjectScales, AUTO_OBJECT_SCALE_KEYS),
   };
 }
 
@@ -438,6 +545,13 @@ export function serializeSettings(settings: AppSettings): string {
     autoDisabledTypes: [...settings.autoDisabledTypes],
     manualSpeedScale: settings.manualSpeedScale,
     autoSpeedScale: settings.autoSpeedScale,
+    // 固定キー集合で全キーを出力し round-trip を安定させる（in-memory に混じった未知/欠損キーがあっても
+    // 保存 JSON は常に MANUAL/AUTO_OBJECT_SCALE_KEYS ちょうどで、reload 後も同一に復元される）。
+    manualObjectScales: normalizeObjectScales(
+      settings.manualObjectScales,
+      MANUAL_OBJECT_SCALE_KEYS,
+    ),
+    autoObjectScales: normalizeObjectScales(settings.autoObjectScales, AUTO_OBJECT_SCALE_KEYS),
   };
   return JSON.stringify(plain);
 }
