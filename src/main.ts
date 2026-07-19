@@ -335,6 +335,10 @@ async function bootstrap(): Promise<void> {
       return;
     }
     autoStoppedByTimer = false;
+    // 「再開」は明示的な再生意思なので、オーバーレイ表示中に押された Space 一時停止(keyPaused)を
+    // クリアしてから再開する。これをしないと直後の applyPause() が keyPaused を pause 要因として
+    // 拾い、再開しても即 pause に戻って固まる（keyPaused の視覚表示も無いためデッドロックに見える）。
+    keyPaused = false;
     playLimitOverlay.hide();
     playLimitTimer.reset();
     // 停止フラグは auto 専用（switchTo が離脱時に必ず解除する）。不変条件が将来崩れても
