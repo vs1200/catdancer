@@ -224,4 +224,27 @@ describe("CritterPopulation: hitTest", () => {
     const { pop } = makePopulation();
     expect(pop.hitTest(0, 0)).toBeNull();
   });
+
+  it("破棄済み(destroyed)の critter はヒット対象にしない（外部 despawn で残留した個体を返さない）", () => {
+    // 外部経路（例: main.ts の teardownCustomCritter が scene.despawnWhere で Scene のみから消す）で
+    // destroy 済みだが、次フレームの update prune 前で内部 list に残留している状況を再現する。
+    const dead = makeCritter({ x: 400, y: 300, size: 100, destroyed: true });
+    const { pop } = makePopulation([dead]);
+    pop.spawn(SPAWN_PARAMS);
+
+    // タップが破棄済み individual の中心に当たっても、破棄済みは返さない（＝後段の種別解決クラッシュを防ぐ）。
+    expect(pop.hitTest(400, 300)).toBeNull();
+  });
+
+  it("破棄済みは飛ばして、生存する次点の critter を返す", () => {
+    // 同点/近傍に破棄済みが居ても、生存個体だけで最近傍を決める。
+    const dead = makeCritter({ x: 400, y: 300, size: 100, destroyed: true });
+    const alive = makeCritter({ x: 410, y: 300, size: 100 });
+    const { pop } = makePopulation([dead, alive]);
+    pop.spawn(SPAWN_PARAMS);
+    pop.spawn(SPAWN_PARAMS);
+
+    // タップ(405,300): dead(距離5)が最近だが破棄済み → 生存 alive(距離5, 半径60内) を返す。
+    expect(pop.hitTest(405, 300)).toBe(alive as unknown as Critter);
+  });
 });

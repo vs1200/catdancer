@@ -129,13 +129,22 @@ export class CritterPopulation {
   /**
    * world 座標 (x,y) を全 critter とヒットテストし、当たり半径（{@link hitRadius}＝size ベース＋
    * 指先下限）内で最も近い 1 体を返す（誰にも当たらなければ null）。AutoMode の捕獲(flee)ヒット
-   * テストと同一ロジック（将来の AutoMode 委譲用。Insect は使わない）。
+   * テストと同一ロジック（Insect は使わない）。
+   *
+   * 破棄済み（{@link Critter.destroyed}）critter はスキップする（次の {@link update} 自己修復 prune で
+   * list から落ちる前の窓＝外部 despawn 経路で Scene のみから消され list に残留した個体を返さない）。
+   * これが無いと、呼び出し側が破棄済み critter の state を後段処理（種別解決など）に渡してクラッシュし得る。
+   * 通常フローでは破棄済みは prune/reap 済みで存在しないため、この分岐は挙動不変（病的窓のみ塞ぐ）。
    */
   hitTest(worldX: number, worldY: number): Critter | null {
     let best: Critter | null = null;
     let bestDistSq = Number.POSITIVE_INFINITY;
     for (let i = 0; i < this.active.length; i++) {
       const c = this.active[i];
+      // 破棄済みは（次フレームの prune 前でも）ヒット対象にしない＝破棄済み state を返さない。
+      if (c.destroyed) {
+        continue;
+      }
       const dx = c.state.position.x - worldX;
       const dy = c.state.position.y - worldY;
       const distSq = dx * dx + dy * dy;
