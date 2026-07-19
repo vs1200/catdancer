@@ -512,6 +512,40 @@ async function bootstrap(): Promise<void> {
   optionsPanel.mount(document.body);
   optionsButton.mount(document.body);
 
+  // [UR3-1] 歯車ボタンの「当たり判定」に持たせる周辺マージン(px)。hideCursor=ON 時、歯車の矩形を
+  // この値だけ上下左右へ広げた範囲へポインタが入ったらカーソルを表示する。要望「非表示範囲が広すぎて
+  // 歯車へマウスを持っていきにくい」への対応。歯車の見た目/クリック判定（cursor:pointer や当たり）は
+  // 一切変えず（クリックは従来どおり canvas に残す）、カーソルの“可視性”だけを歯車の近傍へ広げる。
+  // 近づくと自然に出る体感で 48〜80px を検討し 64px を採用。
+  const GEAR_CURSOR_MARGIN_PX = 64;
+  // 歯車ボタンの矩形（clientX/Y と同座標系）をキャッシュする。position:fixed で bottom/right 固定のため
+  // 矩形はリサイズ時のみ変わる。pointermove はホットパスなので、そこから getBoundingClientRect の
+  // レイアウト読み取りを外し、resize（全画面トグル/回転含む）でのみ再計算する。
+  let gearRect = optionsButton.element.getBoundingClientRect();
+  const refreshGearRect = (): void => {
+    gearRect = optionsButton.element.getBoundingClientRect();
+  };
+  window.addEventListener("resize", refreshGearRect);
+  // hideCursor=ON かつ パネル閉のときだけ、歯車周辺マージン内でカーソルを出す“refine”を行う。
+  // hideCursor=OFF（既定）や パネル開の間は早期 return し、applyCursorVisibility が決めたベース状態
+  // を一切書き換えない＝既定挙動は完全に不変。歯車の真上でもマージン内なので表示される（回帰なし）。
+  // 更新するのは mount(#app) のカーソル可視性のみで、位置取得やクリック配線には触れない。
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      if (!hideCursor || panelOpen) {
+        return;
+      }
+      const inMargin =
+        event.clientX >= gearRect.left - GEAR_CURSOR_MARGIN_PX &&
+        event.clientX <= gearRect.right + GEAR_CURSOR_MARGIN_PX &&
+        event.clientY >= gearRect.top - GEAR_CURSOR_MARGIN_PX &&
+        event.clientY <= gearRect.bottom + GEAR_CURSOR_MARGIN_PX;
+      mount.style.cursor = inMargin ? "" : "none";
+    },
+    { passive: true },
+  );
+
   // 復元した mode でモードを開始する。
   // m2: サンプルロード(loadCritterSamples)を texture ロードと重ねて開始していたので、走行ループ(createLoop)を
   // 張る直前でここで await する。これで「サンプル登録が createLoop より前に完了する」不変条件を満たしつつ、
