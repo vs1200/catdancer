@@ -120,6 +120,14 @@ export class InsectManualController implements ManualController {
     }
     const { scene } = this.deps;
     this.ctx.world = scene.worldBounds;
+    // 0) 外部 despawn（DEV `__catScene.clear()` 等）で破棄された虫を内部リストから除去する自己修復。
+    //    破棄済み Container を更新すると syncView が null 参照でクラッシュするため、後方走査で splice する。
+    //    既に destroy 済みなので scene.despawn は呼ばない（二重破棄回避）。
+    for (let i = this.critters.length - 1; i >= 0; i--) {
+      if (this.critters[i].destroyed) {
+        this.critters.splice(i, 1);
+      }
+    }
     // 1) 各虫を更新（自前リストを走査。scene には本コントローラの虫しか居ない）。
     for (let i = 0; i < this.critters.length; i++) {
       this.critters[i].update(dtSeconds, this.ctx);

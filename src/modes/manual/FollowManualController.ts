@@ -122,6 +122,12 @@ export class FollowManualController implements ManualController {
   }
 
   update(dtSeconds: number): void {
+    // 外部 despawn（DEV `__catScene.clear()` 等）で破棄された critter への参照を落とす自己修復。
+    // 破棄済み Container を更新すると syncView が null 参照でクラッシュするため、参照を null にして
+    // 既存ガードで早期 return させる（既に destroy 済みなので scene.despawn は呼ばない）。
+    if (this.critter?.destroyed) {
+      this.critter = null;
+    }
     if (!this.running || this.paused || !this.critter) {
       return;
     }

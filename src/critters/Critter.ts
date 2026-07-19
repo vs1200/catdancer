@@ -147,6 +147,11 @@ export class Critter {
     return this.tail?.tip ?? null;
   }
 
+  /** 表示 Container が破棄済みか（外部 despawn 後の自己修復判定に使う）。 */
+  get destroyed(): boolean {
+    return this.view.destroyed;
+  }
+
   update(dtSeconds: number, ctx: MovementContext): void {
     // ctx.speedScale で critter 全体を 1 つのスケール時計で動かす（movement/回頭/尻尾すべてに
     // 同じ scaledDt を渡す＝視覚的に一貫）。未指定は 1 として扱い、scale=1 なら scaledDt===dtSeconds
