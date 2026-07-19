@@ -38,10 +38,13 @@ import {
   normalizeMuted,
   normalizeObjectScale,
   normalizeObjectScales,
+  normalizeObjectSoundEnabled,
   normalizeSettings,
+  normalizeSoundEnabled,
   normalizeSpeedScale,
   OBJECT_SCALE_OPTIONS,
   parseSettings,
+  SOUND_TOGGLE_KEYS,
   serializeSettings,
 } from "../../src/settings/settingsData";
 
@@ -58,6 +61,14 @@ const DEFAULT_AUTO_OBJECT_SCALES: Record<string, number> = {
   [FOXTAIL_TYPE_ID]: 1.0,
   [TOYS_TYPE_ID]: 1.0,
   [INSECT_TYPE_ID]: 1.0,
+};
+/** [UR4-3] テスト内で使う「全5種別 SE 有効(true)」の完全レコード（既定期待値の補助）。 */
+const DEFAULT_OBJECT_SOUND_ENABLED: Record<string, boolean> = {
+  [MOUSE_TYPE_ID]: true,
+  [FOXTAIL_TYPE_ID]: true,
+  [TOYS_TYPE_ID]: true,
+  [INSECT_TYPE_ID]: true,
+  [CUSTOM_CRITTER_TYPE_ID]: true,
 };
 
 describe("normalizeHexColor", () => {
@@ -523,6 +534,87 @@ describe("normalizeObjectScales", () => {
   });
 });
 
+describe("[UR4-3] normalizeSoundEnabled", () => {
+  it("真偽値はそのまま採る", () => {
+    expect(normalizeSoundEnabled(true)).toBe(true);
+    expect(normalizeSoundEnabled(false)).toBe(false);
+  });
+
+  it("欠損/null/数値/文字列/配列/オブジェクト/Symbol/BigInt は既定 true へフォールバックし例外を投げない", () => {
+    for (const raw of [
+      undefined,
+      null,
+      0,
+      1,
+      "",
+      "false",
+      "true",
+      [],
+      [true],
+      {},
+      Symbol("x"),
+      10n,
+    ]) {
+      expect(() => normalizeSoundEnabled(raw)).not.toThrow();
+      expect(normalizeSoundEnabled(raw)).toBe(true);
+    }
+  });
+});
+
+describe("[UR4-3] normalizeObjectSoundEnabled", () => {
+  it("固定キー集合を反復し boolean を保持、欠損キーは true で埋める（完全レコード）", () => {
+    expect(
+      normalizeObjectSoundEnabled(
+        { [MOUSE_TYPE_ID]: false, [TOYS_TYPE_ID]: true },
+        SOUND_TOGGLE_KEYS,
+      ),
+    ).toEqual({
+      [MOUSE_TYPE_ID]: false,
+      [FOXTAIL_TYPE_ID]: true,
+      [TOYS_TYPE_ID]: true,
+      [INSECT_TYPE_ID]: true,
+      [CUSTOM_CRITTER_TYPE_ID]: true,
+    });
+  });
+
+  it("未知キー（keys に無いもの）は読まず自動的に落とす", () => {
+    const out = normalizeObjectSoundEnabled(
+      { [MOUSE_TYPE_ID]: false, bogus: false },
+      SOUND_TOGGLE_KEYS,
+    );
+    expect(Object.keys(out).sort()).toEqual([...SOUND_TOGGLE_KEYS].sort());
+    expect((out as Record<string, unknown>).bogus).toBeUndefined();
+  });
+
+  it("非オブジェクト raw（null/配列/数値/文字列/boolean）は全キー true の完全レコード", () => {
+    for (const raw of [null, undefined, 42, "x", [], [1, 2], true, false]) {
+      expect(normalizeObjectSoundEnabled(raw, SOUND_TOGGLE_KEYS)).toEqual(
+        DEFAULT_OBJECT_SOUND_ENABLED,
+      );
+    }
+  });
+
+  it("異常値キー（数値/null/文字列/Symbol/BigInt）は true に落とし例外を投げない", () => {
+    const raw: Record<string, unknown> = {
+      [MOUSE_TYPE_ID]: 0,
+      [FOXTAIL_TYPE_ID]: null,
+      [TOYS_TYPE_ID]: "false",
+      [INSECT_TYPE_ID]: Symbol("x"),
+      [CUSTOM_CRITTER_TYPE_ID]: 1n,
+    };
+    expect(() => normalizeObjectSoundEnabled(raw, SOUND_TOGGLE_KEYS)).not.toThrow();
+    expect(normalizeObjectSoundEnabled(raw, SOUND_TOGGLE_KEYS)).toEqual(
+      DEFAULT_OBJECT_SOUND_ENABLED,
+    );
+  });
+
+  it("SOUND_TOGGLE_KEYS は全5種別（mouse/foxtail/toys/insect/custom）", () => {
+    expect([...SOUND_TOGGLE_KEYS].sort()).toEqual(
+      [MOUSE_TYPE_ID, FOXTAIL_TYPE_ID, TOYS_TYPE_ID, INSECT_TYPE_ID, CUSTOM_CRITTER_TYPE_ID].sort(),
+    );
+  });
+});
+
 describe("createDefaultSettings", () => {
   it("既定は単色 白 / master 0.5 / imageId null / mode manual / interval 1500 / 遊びすぎ防止 OFF / 無効種別なし / manual速さ 1.0 / auto速さ 1.8", () => {
     const s = createDefaultSettings();
@@ -542,6 +634,7 @@ describe("createDefaultSettings", () => {
       autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
       manualObjectScales: DEFAULT_MANUAL_OBJECT_SCALES,
       autoObjectScales: DEFAULT_AUTO_OBJECT_SCALES,
+      objectSoundEnabled: DEFAULT_OBJECT_SOUND_ENABLED,
     });
     expect(DEFAULT_INSECT_MANUAL_PATTERN).toBe("click");
     expect(DEFAULT_BACKGROUND_COLOR).toBe("#ffffff");
@@ -564,14 +657,17 @@ describe("createDefaultSettings", () => {
     expect(a.autoDisabledTypes).not.toBe(b.autoDisabledTypes);
     expect(a.manualObjectScales).not.toBe(b.manualObjectScales);
     expect(a.autoObjectScales).not.toBe(b.autoObjectScales);
+    expect(a.objectSoundEnabled).not.toBe(b.objectSoundEnabled);
     a.background.color = "#000000";
     a.autoDisabledTypes.push("mouse");
     a.manualObjectScales[MOUSE_TYPE_ID] = 2.0;
     a.autoObjectScales[TOYS_TYPE_ID] = 0.6;
+    a.objectSoundEnabled[MOUSE_TYPE_ID] = false;
     expect(b.background.color).toBe(DEFAULT_BACKGROUND_COLOR);
     expect(b.autoDisabledTypes).toEqual([]);
     expect(b.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.0);
     expect(b.autoObjectScales[TOYS_TYPE_ID]).toBe(1.0);
+    expect(b.objectSoundEnabled[MOUSE_TYPE_ID]).toBe(true);
   });
 });
 
@@ -605,6 +701,13 @@ describe("normalizeSettings", () => {
           [TOYS_TYPE_ID]: 1.6,
           [INSECT_TYPE_ID]: 0.6,
         },
+        objectSoundEnabled: {
+          [MOUSE_TYPE_ID]: false,
+          [FOXTAIL_TYPE_ID]: true,
+          [TOYS_TYPE_ID]: false,
+          [INSECT_TYPE_ID]: true,
+          [CUSTOM_CRITTER_TYPE_ID]: false,
+        },
       }),
     ).toEqual({
       background: { type: "image", color: "#112233", imageId: "bg-1" },
@@ -632,6 +735,13 @@ describe("normalizeSettings", () => {
         [FOXTAIL_TYPE_ID]: 1.3,
         [TOYS_TYPE_ID]: 1.6,
         [INSECT_TYPE_ID]: 0.6,
+      },
+      objectSoundEnabled: {
+        [MOUSE_TYPE_ID]: false,
+        [FOXTAIL_TYPE_ID]: true,
+        [TOYS_TYPE_ID]: false,
+        [INSECT_TYPE_ID]: true,
+        [CUSTOM_CRITTER_TYPE_ID]: false,
       },
     });
   });
@@ -842,6 +952,29 @@ describe("normalizeSettings", () => {
     expect(s.autoObjectScales[CUSTOM_CRITTER_TYPE_ID]).toBeUndefined();
   });
 
+  it("[UR4-3] objectSoundEnabled は欠損で全キー true、未知キー無視、boolean 値は保持", () => {
+    // 欠損は全キー既定 true の完全レコード。
+    expect(normalizeSettings({}).objectSoundEnabled).toEqual(DEFAULT_OBJECT_SOUND_ENABLED);
+    // boolean 値は保持し、欠損キーは true で埋め、未知キー(bogus)は落とす。異常型は既定 true。
+    const s = normalizeSettings({
+      objectSoundEnabled: { [MOUSE_TYPE_ID]: false, [INSECT_TYPE_ID]: 1, bogus: false },
+    });
+    expect(s.objectSoundEnabled).toEqual({
+      [MOUSE_TYPE_ID]: false,
+      [FOXTAIL_TYPE_ID]: true,
+      [TOYS_TYPE_ID]: true,
+      [INSECT_TYPE_ID]: true, // 数値 1 は boolean でないので既定 true
+      [CUSTOM_CRITTER_TYPE_ID]: true,
+    });
+    // 未知キーは結果に現れない（キー集合が真実源）。
+    expect((s.objectSoundEnabled as Record<string, unknown>).bogus).toBeUndefined();
+    // 非オブジェクト（true/数値）は全 true の完全レコードへフォールバック（throw しない）。
+    expect(() => normalizeSettings({ objectSoundEnabled: true })).not.toThrow();
+    expect(normalizeSettings({ objectSoundEnabled: 42 }).objectSoundEnabled).toEqual(
+      DEFAULT_OBJECT_SOUND_ENABLED,
+    );
+  });
+
   it("数値フィールドの型不一致(破損/改竄 localStorage 由来)は全て既定へ正規化する", () => {
     // 破損/改竄/旧版由来の永続値を想定。boolean/null/空文字/配列/オブジェクトが
     // Number() 化けで誤った値（音量暴発・spawn 頻発・遊びすぎ制限の誤ON）にならないことの契約実証。
@@ -894,6 +1027,13 @@ describe("serializeSettings / parseSettings", () => {
         [TOYS_TYPE_ID]: 1.6,
         [INSECT_TYPE_ID]: 0.6,
       },
+      objectSoundEnabled: {
+        [MOUSE_TYPE_ID]: false,
+        [FOXTAIL_TYPE_ID]: true,
+        [TOYS_TYPE_ID]: false,
+        [INSECT_TYPE_ID]: true,
+        [CUSTOM_CRITTER_TYPE_ID]: false,
+      },
     };
     const restored = parseSettings(serializeSettings(original));
     expect(restored).toEqual(original);
@@ -918,6 +1058,7 @@ describe("serializeSettings / parseSettings", () => {
       "masterVolume",
       "mode",
       "muted",
+      "objectSoundEnabled",
     ]);
     expect(Object.keys(parsed.background as object).sort()).toEqual(["color", "imageId", "type"]);
   });
@@ -949,6 +1090,7 @@ describe("serializeSettings / parseSettings", () => {
       autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
       manualObjectScales: DEFAULT_MANUAL_OBJECT_SCALES,
       autoObjectScales: DEFAULT_AUTO_OBJECT_SCALES,
+      objectSoundEnabled: DEFAULT_OBJECT_SOUND_ENABLED,
     });
   });
 
@@ -965,6 +1107,19 @@ describe("serializeSettings / parseSettings", () => {
     const legacy = parseSettings('{"masterVolume":0.4,"mode":"auto"}');
     expect(legacy.manualObjectScales).toEqual(DEFAULT_MANUAL_OBJECT_SCALES);
     expect(legacy.autoObjectScales).toEqual(DEFAULT_AUTO_OBJECT_SCALES);
+  });
+
+  it("[UR4-3] objectSoundEnabled 往復: per-type 値を保存・復元し、旧 JSON は全キー true（後方互換）", () => {
+    const on = createDefaultSettings();
+    on.objectSoundEnabled[MOUSE_TYPE_ID] = false;
+    on.objectSoundEnabled[INSECT_TYPE_ID] = false;
+    const restored = parseSettings(serializeSettings(on));
+    expect(restored.objectSoundEnabled[MOUSE_TYPE_ID]).toBe(false);
+    expect(restored.objectSoundEnabled[INSECT_TYPE_ID]).toBe(false);
+    expect(restored.objectSoundEnabled[FOXTAIL_TYPE_ID]).toBe(true);
+    // フィールドを持たない旧 localStorage JSON は全キー true の完全レコードへフォールバック（既定＝鳴る）。
+    const legacy = parseSettings('{"masterVolume":0.4,"mode":"auto"}');
+    expect(legacy.objectSoundEnabled).toEqual(DEFAULT_OBJECT_SOUND_ENABLED);
   });
 
   it("muted 往復: true/false ともに保持し、フィールド無しの旧 JSON は false（後方互換）", () => {

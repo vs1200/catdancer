@@ -108,6 +108,14 @@ export interface AppSettings {
    * spawn 時に UR4-1 の viewport sizeScale の上へ乗せる純増倍率。manual とは独立に設定・永続化する。
    */
   autoObjectScales: Record<string, number>;
+  /**
+   * [UR4-3] オブジェクト種別ごとの効果音 ON/OFF（種別 id → true=SE鳴る / false=ミュート）。既定は全キー true。
+   * キー集合は {@link SOUND_TOGGLE_KEYS}（mouse/foxtail/toys/insect/custom＝全5種別）で固定する。
+   * false の種別はループSE（走行音/羽音）も one-shot（鳴き声/キャッチ）も鳴らさない（manual/auto 共通の
+   * 単一フラグ＝モード個別化はしない）。present-gate へ live-apply し respawn せず即反映する。
+   * 欠損キーは true、未知キーは落とす、非オブジェクトは全 true（{@link normalizeObjectSoundEnabled}）。
+   */
+  objectSoundEnabled: Record<string, boolean>;
 }
 
 /** 既定の背景色（単色 白）。 */
@@ -176,6 +184,20 @@ export const AUTO_OBJECT_SCALE_KEYS: readonly string[] = [
   FOXTAIL_TYPE_ID,
   TOYS_TYPE_ID,
   INSECT_TYPE_ID,
+];
+
+/**
+ * [UR4-3] 効果音 ON/OFF を持つ種別 id 集合（全5種別＝mouse/foxtail/toys/insect/custom）。
+ * この配列が「per-type SE トグルレコードのキー」の単一の真実源になり、normalize/serialize が
+ * このキー集合を反復する（未知キーを落とし、欠損キーを既定 true で埋める＝round-trip 安定）。
+ * MANUAL_OBJECT_SCALE_KEYS と同じ集合だが、用途（サイズ倍率 vs 効果音）が別なので専用定数にする。
+ */
+export const SOUND_TOGGLE_KEYS: readonly string[] = [
+  MOUSE_TYPE_ID,
+  FOXTAIL_TYPE_ID,
+  TOYS_TYPE_ID,
+  INSECT_TYPE_ID,
+  CUSTOM_CRITTER_TYPE_ID,
 ];
 
 /** [UR3-5] 虫の動きパターン UI 選択肢 1 件。value は正規化許可集合、label は UI 表示名。 */
@@ -415,6 +437,35 @@ export function normalizeObjectScales(
   return out;
 }
 
+/**
+ * [UR4-3] 効果音 ON/OFF フラグを正規化する。真偽値はそのまま採り、それ以外
+ * （欠損/null/数値/文字列/配列/オブジェクト/Symbol/BigInt）は既定 true（SE鳴る）へフォールバックする。
+ * === 型判定のみで型を問わず例外を投げない（破損/改竄 localStorage 由来の異常入力への堅牢化。
+ * 欠損が true になるのは「新種別/旧 storage はデフォルトで鳴る」前方/後方互換のため）。
+ */
+export function normalizeSoundEnabled(value: unknown): boolean {
+  return typeof value === "boolean" ? value : true;
+}
+
+/**
+ * [UR4-3] 種別ごとの効果音 ON/OFF レコード（種別 id → boolean）を、固定キー集合 keys を反復して正規化する。
+ * 各キーは {@link normalizeSoundEnabled}(asRecord(raw)[key]) で埋めるため、欠損キー/異常値は true になり、
+ * 未知キー（keys に無いもの）は読まず自動的に落ちる。非オブジェクト raw（null/配列/数値等）でも
+ * asRecord が {} を返すので全キー true の完全レコードになる（round-trip 安定・キー集合が真実源。
+ * normalizeObjectScales と同構造）。
+ */
+export function normalizeObjectSoundEnabled(
+  raw: unknown,
+  keys: readonly string[],
+): Record<string, boolean> {
+  const obj = asRecord(raw);
+  const out: Record<string, boolean> = {};
+  for (const key of keys) {
+    out[key] = normalizeSoundEnabled(obj[key]);
+  }
+  return out;
+}
+
 /** デフォルト設定を新規生成する（呼び出しごとに独立したオブジェクト）。 */
 export function createDefaultSettings(): AppSettings {
   return {
@@ -437,6 +488,7 @@ export function createDefaultSettings(): AppSettings {
     autoSpeedScale: DEFAULT_AUTO_SPEED_SCALE,
     manualObjectScales: normalizeObjectScales({}, MANUAL_OBJECT_SCALE_KEYS),
     autoObjectScales: normalizeObjectScales({}, AUTO_OBJECT_SCALE_KEYS),
+    objectSoundEnabled: normalizeObjectSoundEnabled({}, SOUND_TOGGLE_KEYS),
   };
 }
 
@@ -466,6 +518,10 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   autoObjectScales: Object.freeze(normalizeObjectScales({}, AUTO_OBJECT_SCALE_KEYS)) as Record<
     string,
     number
+  >,
+  objectSoundEnabled: Object.freeze(normalizeObjectSoundEnabled({}, SOUND_TOGGLE_KEYS)) as Record<
+    string,
+    boolean
   >,
 }) as AppSettings;
 
@@ -522,6 +578,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     autoSpeedScale,
     manualObjectScales: normalizeObjectScales(obj.manualObjectScales, MANUAL_OBJECT_SCALE_KEYS),
     autoObjectScales: normalizeObjectScales(obj.autoObjectScales, AUTO_OBJECT_SCALE_KEYS),
+    objectSoundEnabled: normalizeObjectSoundEnabled(obj.objectSoundEnabled, SOUND_TOGGLE_KEYS),
   };
 }
 
@@ -552,6 +609,9 @@ export function serializeSettings(settings: AppSettings): string {
       MANUAL_OBJECT_SCALE_KEYS,
     ),
     autoObjectScales: normalizeObjectScales(settings.autoObjectScales, AUTO_OBJECT_SCALE_KEYS),
+    // 固定キー集合で全キー出力し round-trip を安定させる（未知/欠損キーが混じっても保存 JSON は
+    // 常に SOUND_TOGGLE_KEYS ちょうどで、reload 後も同一に復元される）。
+    objectSoundEnabled: normalizeObjectSoundEnabled(settings.objectSoundEnabled, SOUND_TOGGLE_KEYS),
   };
   return JSON.stringify(plain);
 }

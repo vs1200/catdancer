@@ -19,6 +19,7 @@ import {
   normalizeMode,
   normalizeMuted,
   normalizeObjectScale,
+  normalizeSoundEnabled,
   normalizeSpeedScale,
   parseSettings,
   serializeSettings,
@@ -72,6 +73,7 @@ export class SettingsStore {
       autoSpeedScale: this.state.autoSpeedScale,
       manualObjectScales: { ...this.state.manualObjectScales },
       autoObjectScales: { ...this.state.autoObjectScales },
+      objectSoundEnabled: { ...this.state.objectSoundEnabled },
     };
   }
 
@@ -257,6 +259,17 @@ export class SettingsStore {
    */
   setAutoObjectScale(typeId: string, value: number): void {
     this.state.autoObjectScales[typeId] = normalizeObjectScale(value);
+    this.commit();
+  }
+
+  /**
+   * [UR4-3] 指定種別の効果音 ON/OFF を設定する（該当キーのみ更新。永続化＋通知）。
+   * enabled は {@link normalizeSoundEnabled}（真偽値のみ採用・異常型は既定 true）で正規化する。
+   * manual/auto 共通の単一フラグ。main の購読が autoMode.setSoundEnabled へ live-apply し、manual は
+   * 各コントローラが closure でこの値をライブ参照するため respawn せず次フレームの present 判定へ即反映する。
+   */
+  setObjectSoundEnabled(typeId: string, enabled: boolean): void {
+    this.state.objectSoundEnabled[typeId] = normalizeSoundEnabled(enabled);
     this.commit();
   }
 

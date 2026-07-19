@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { FOXTAIL_TYPE_ID } from "../../src/critters/types/foxtail";
 import { CUSTOM_CRITTER_TYPE_ID } from "../../src/critters/types/imageCritter";
+import { INSECT_TYPE_ID } from "../../src/critters/types/insect";
 import { MOUSE_TYPE_ID } from "../../src/critters/types/mouse";
 import { TOYS_TYPE_ID } from "../../src/critters/types/toys";
 import { DEFAULT_MANUAL_TYPE_ID } from "../../src/settings/manualTargets";
@@ -207,5 +208,55 @@ describe("SettingsStore.setManualObjectScale / setAutoObjectScale", () => {
     snap.manualObjectScales[MOUSE_TYPE_ID] = 0.5;
     // 次のスナップショットには漏れない（getter が浅コピーを返す）。
     expect(store.settings.manualObjectScales[MOUSE_TYPE_ID]).toBe(1.6);
+  });
+});
+
+describe("SettingsStore.setObjectSoundEnabled", () => {
+  it("既定は全キー true（SE鳴る）", () => {
+    const store = new SettingsStore("test:soundEnabled:default");
+    expect(store.settings.objectSoundEnabled[MOUSE_TYPE_ID]).toBe(true);
+    expect(store.settings.objectSoundEnabled[CUSTOM_CRITTER_TYPE_ID]).toBe(true);
+  });
+
+  it("該当キーのみ更新し、他キーは不変（commit/notify 1回）", () => {
+    const store = new SettingsStore("test:soundEnabled:one-only");
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.setObjectSoundEnabled(MOUSE_TYPE_ID, false);
+    const snap = store.settings;
+    expect(snap.objectSoundEnabled[MOUSE_TYPE_ID]).toBe(false);
+    // 他キーは true のまま。
+    expect(snap.objectSoundEnabled[FOXTAIL_TYPE_ID]).toBe(true);
+    expect(snap.objectSoundEnabled[INSECT_TYPE_ID]).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        objectSoundEnabled: expect.objectContaining({ [MOUSE_TYPE_ID]: false }),
+      }),
+    );
+  });
+
+  it("再度 true でオンへ戻す（トグル往復）", () => {
+    const store = new SettingsStore("test:soundEnabled:toggle");
+    store.setObjectSoundEnabled(INSECT_TYPE_ID, false);
+    expect(store.settings.objectSoundEnabled[INSECT_TYPE_ID]).toBe(false);
+    store.setObjectSoundEnabled(INSECT_TYPE_ID, true);
+    expect(store.settings.objectSoundEnabled[INSECT_TYPE_ID]).toBe(true);
+  });
+
+  it("異常型でも例外を投げず既定 true へ正規化する", () => {
+    const store = new SettingsStore("test:soundEnabled:normalize");
+    // @ts-expect-error 敵対的入力（boolean 以外は既定 true）。
+    expect(() => store.setObjectSoundEnabled(TOYS_TYPE_ID, 0)).not.toThrow();
+    expect(store.settings.objectSoundEnabled[TOYS_TYPE_ID]).toBe(true);
+  });
+
+  it("スナップショットのレコードは内部 state から切り離されている（直接改変が漏れない）", () => {
+    const store = new SettingsStore("test:soundEnabled:snapshot-copy");
+    store.setObjectSoundEnabled(MOUSE_TYPE_ID, false);
+    const snap = store.settings;
+    snap.objectSoundEnabled[MOUSE_TYPE_ID] = true;
+    // 次のスナップショットには漏れない（getter が浅コピーを返す）。
+    expect(store.settings.objectSoundEnabled[MOUSE_TYPE_ID]).toBe(false);
   });
 });
