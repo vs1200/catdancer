@@ -23,9 +23,10 @@ import { AutoMode, type AutoModeEntry } from "../../src/modes/AutoMode";
  *   CritterAudioController）で既にテスト済みのため本ファイルでは Map 配線に集中する。
  */
 
-/** setLevel/stop を spy した fake LoopVoice。 */
+/** setLevel/setPan/stop を spy した fake LoopVoice。 */
 interface FakeVoice extends LoopVoice {
   setLevel: ReturnType<typeof vi.fn<(level: number) => void>>;
+  setPan: ReturnType<typeof vi.fn<(pan: number) => void>>;
   stop: ReturnType<typeof vi.fn<() => void>>;
 }
 
@@ -35,12 +36,14 @@ function makeFakeAudio() {
   const createLoop = vi.fn<(id: string) => LoopVoice>((_id): LoopVoice => {
     const v: FakeVoice = {
       setLevel: vi.fn<(level: number) => void>(),
+      setPan: vi.fn<(pan: number) => void>(),
       stop: vi.fn<() => void>(),
     };
     voices.push(v);
     return v;
   });
-  const playOneShot = vi.fn<(id: string) => void>();
+  // [UR4-4] playOneShot は (id, pan?) 受け。既存テストは id のみ検証（pan は optional で後方互換）。
+  const playOneShot = vi.fn<(id: string, pan?: number) => void>();
   const sink: AudioSink = { playOneShot, createLoop };
   return { sink, createLoop, playOneShot, voices };
 }

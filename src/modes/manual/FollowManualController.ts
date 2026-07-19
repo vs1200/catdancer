@@ -2,7 +2,7 @@ import type { Texture } from "pixi.js";
 import type { PointerInput } from "../../app/PointerInput";
 import type { Scene } from "../../app/Scene";
 import type { AudioSink } from "../../audio/AudioManager";
-import { SCURRY_LEVEL_MOUSE_FOLLOW } from "../../audio/audioMath";
+import { panFromX, SCURRY_LEVEL_MOUSE_FOLLOW } from "../../audio/audioMath";
 import { CritterAudioController } from "../../audio/CritterAudioController";
 import type { Critter } from "../../critters/Critter";
 import { spawnCritter } from "../../critters/Critter";
@@ -186,10 +186,12 @@ export class FollowManualController implements ManualController {
     }
     this.critter.update(dtSeconds, this.ctx);
     const speed = Math.hypot(this.critter.state.velocity.x, this.critter.state.velocity.y);
+    // [UR4-4] 追従中の critter の x 位置で走行音を左右定位する（画面左を走れば左、右なら右）。
+    const pan = panFromX(this.critter.state.position.x, this.deps.scene.worldBounds.viewport.width);
     // 1 体で常に存在するため通常は present=true。[UR4-5] manualFollowMuteAutoSound 種別(mouse)は
     // present=false を渡し、自動SE(走行音 move ループの gain=0 固定＋voice スケジューラの自動チュー)を
-    // 一切駆動しない（鳴き声は onPointerDown のクリック時のみ）。
-    this.audioCtrl.update(speed, dtSeconds, this.drivesAutoAudio);
+    // 一切駆動しない（鳴き声は onPointerDown のクリック時のみ）。present=false 経路は pan を無視する。
+    this.audioCtrl.update(speed, dtSeconds, this.drivesAutoAudio, pan);
   }
 
   /**

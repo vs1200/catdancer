@@ -83,6 +83,17 @@ export function panFromX(x: number, viewportWidth: number): number {
   return pan < -1 ? -1 : pan > 1 ? 1 : pan;
 }
 
+/**
+ * [UR4-4] パン値を StereoPanner.pan の範囲 [-1,1] に収める（NaN は 0=中央へ落とす）。
+ * panFromX は既に範囲内を返すが、既定 pan(0) や外部由来値を StereoPanner へ渡す前の防御に使う。
+ */
+export function clampPan(pan: number): number {
+  if (Number.isNaN(pan)) {
+    return 0;
+  }
+  return pan < -1 ? -1 : pan > 1 ? 1 : pan;
+}
+
 /** オシレータ波形（squeak 用）。 */
 export type OscillatorWaveform = "sine" | "triangle" | "sawtooth" | "square";
 

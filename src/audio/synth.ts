@@ -1,4 +1,4 @@
-import type { SqueakParams } from "./audioMath";
+import { clampPan, type SqueakParams } from "./audioMath";
 
 /**
  * Web Audio によるSE合成（オシレータ/ノイズのグラフ構築）。
@@ -16,26 +16,42 @@ export interface AudioEngine {
 export interface LoopVoice {
   /** 強さ 0..1。0 でほぼ無音。範囲外は内部でクランプ。 */
   setLevel(level: number): void;
+  /**
+   * [UR4-4] 左右パン -1..1（中央0/左端-1/右端+1）を設定する。発音元 critter の x 位置に追従させ、
+   * ループSEを毎フレーム定位させる。範囲外は内部でクランプ。stop 後は no-op。
+   */
+  setPan(pan: number): void;
   /** 停止して全ノードを切断（リーク防止）。 */
   stop(): void;
 }
+
+/**
+ * [UR4-4] パン平滑化の時定数(秒)。setTargetAtTime で毎フレームの pan 追従を段差なく滑らかにし、
+ * 急な値変化によるゼッパー（zipper noise）を避ける。追従の俊敏さと滑らかさの両立を狙った小さめの値。
+ */
+const PAN_SMOOTH_TAU = 0.04;
 
 /**
  * 「キャッチ」ワンショットSEを 1 発再生する（voice を持たない種別＝虫/猫じゃらし/おもちゃ/カスタムの
  * 捕獲フィードバック用）。立ち上がりの帯域制限ノイズ・クリック（"tk"）＋速いピッチ下降のブリップ（"ポッ"）で、
  * 猫がタップに反応した狩猟の手応えを短く出す。終了後に onended で全ノードを切断しリークさせない。
  */
-export function playCatch(engine: AudioEngine): void {
+export function playCatch(engine: AudioEngine, pan = 0): void {
   const { context, output } = engine;
   const t0 = context.currentTime;
   const duration = 0.12;
+
+  // [UR4-4] 2 系統（ブリップ＋クリック）を 1 つの panner に集約して発火位置で左右定位する。
+  const panner = context.createStereoPanner();
+  panner.pan.value = clampPan(pan);
+  panner.connect(output);
 
   // ピッチ下降のブリップ（"ポッ"）: 高→低へ速く落ちる短音。
   const osc = context.createOscillator();
   osc.type = "triangle";
   const oscGain = context.createGain();
   osc.connect(oscGain);
-  oscGain.connect(output);
+  oscGain.connect(panner);
   osc.frequency.setValueAtTime(920, t0);
   osc.frequency.exponentialRampToValueAtTime(220, t0 + duration);
   oscGain.gain.setValueAtTime(0.0001, t0);
@@ -52,7 +68,7 @@ export function playCatch(engine: AudioEngine): void {
   const noiseGain = context.createGain();
   noise.connect(bandpass);
   bandpass.connect(noiseGain);
-  noiseGain.connect(output);
+  noiseGain.connect(panner);
   noiseGain.gain.setValueAtTime(0.3, t0);
   noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.04);
 
@@ -60,13 +76,14 @@ export function playCatch(engine: AudioEngine): void {
   osc.stop(t0 + duration + 0.02);
   noise.start(t0);
   noise.stop(t0 + 0.06);
-  // osc が最後に終わるので、その onended で全ノードをまとめて切断する。
+  // osc が最後に終わるので、その onended で全ノード（panner 含む）をまとめて切断する（リーク防止）。
   osc.onended = (): void => {
     osc.disconnect();
     oscGain.disconnect();
     noise.disconnect();
     bandpass.disconnect();
     noiseGain.disconnect();
+    panner.disconnect();
   };
 }
 
@@ -86,7 +103,7 @@ function createNoiseBuffer(context: AudioContext, seconds: number): AudioBuffer 
  * ピッチ: start→peak→end の速い上下チャープ。アンプ: 速いアタック→減衰の短音。
  * 終了後に onended で全ノードを切断し、長時間再生でもノードがリークしないようにする。
  */
-export function playSqueak(engine: AudioEngine, params: SqueakParams): void {
+export function playSqueak(engine: AudioEngine, params: SqueakParams, pan = 0): void {
   const { context, output } = engine;
   const t0 = context.currentTime;
   const { startFreq, peakFreq, endFreq, duration, peakTime, gainPeak } = params;
@@ -94,8 +111,12 @@ export function playSqueak(engine: AudioEngine, params: SqueakParams): void {
   const osc = context.createOscillator();
   osc.type = params.waveform;
   const gain = context.createGain();
+  // [UR4-4] 発火位置で左右定位する（gain → panner → output）。
+  const panner = context.createStereoPanner();
+  panner.pan.value = clampPan(pan);
   osc.connect(gain);
-  gain.connect(output);
+  gain.connect(panner);
+  panner.connect(output);
 
   // ピッチ・エンベロープ（上下チャープ）。exponentialRamp は 0 を扱えないため周波数は正値のみ。
   osc.frequency.setValueAtTime(startFreq, t0);
@@ -113,6 +134,7 @@ export function playSqueak(engine: AudioEngine, params: SqueakParams): void {
   osc.onended = (): void => {
     osc.disconnect();
     gain.disconnect();
+    panner.disconnect();
   };
 }
 
@@ -157,11 +179,15 @@ export function createScurryVoice(engine: AudioEngine): LoopVoice {
   const level = context.createGain();
   level.gain.value = 0;
 
+  // [UR4-4] 発音元 x に追従して左右定位する（level → panner → output）。
+  const panner = context.createStereoPanner();
+
   noise.connect(highpass);
   highpass.connect(bandpass);
   bandpass.connect(trem);
   trem.connect(level);
-  level.connect(output);
+  level.connect(panner);
+  panner.connect(output);
 
   noise.start();
   lfo.start();
@@ -175,6 +201,12 @@ export function createScurryVoice(engine: AudioEngine): LoopVoice {
       const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
       const target = clamped * SCURRY_MAX_GAIN;
       level.gain.setTargetAtTime(target, context.currentTime, SCURRY_SMOOTH_TAU);
+    },
+    setPan(pan: number): void {
+      if (stopped) {
+        return;
+      }
+      panner.pan.setTargetAtTime(clampPan(pan), context.currentTime, PAN_SMOOTH_TAU);
     },
     stop(): void {
       if (stopped) {
@@ -194,6 +226,7 @@ export function createScurryVoice(engine: AudioEngine): LoopVoice {
       lfoDepth.disconnect();
       lfo.disconnect();
       level.disconnect();
+      panner.disconnect();
     },
   };
 }
@@ -247,10 +280,14 @@ export function createBuzzVoice(engine: AudioEngine): LoopVoice {
   const level = context.createGain();
   level.gain.value = 0;
 
+  // [UR4-4] 発音元 x に追従して左右定位する（level → panner → output）。
+  const panner = context.createStereoPanner();
+
   osc.connect(bandpass);
   bandpass.connect(trem);
   trem.connect(level);
-  level.connect(output);
+  level.connect(panner);
+  panner.connect(output);
 
   osc.start();
   pitchLfo.start();
@@ -265,6 +302,12 @@ export function createBuzzVoice(engine: AudioEngine): LoopVoice {
       const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
       const target = clamped * BUZZ_MAX_GAIN;
       level.gain.setTargetAtTime(target, context.currentTime, BUZZ_SMOOTH_TAU);
+    },
+    setPan(pan: number): void {
+      if (stopped) {
+        return;
+      }
+      panner.pan.setTargetAtTime(clampPan(pan), context.currentTime, PAN_SMOOTH_TAU);
     },
     stop(): void {
       if (stopped) {
@@ -286,6 +329,7 @@ export function createBuzzVoice(engine: AudioEngine): LoopVoice {
       ampLfo.disconnect();
       ampDepth.disconnect();
       level.disconnect();
+      panner.disconnect();
     },
   };
 }

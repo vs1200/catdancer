@@ -50,8 +50,13 @@ export class CritterAudioController {
    * 毎フレーム: 速さ(px/秒)で走行音 gain を更新し、チューチューを断続発火する。
    * present=false（この種別の critter が画面に居ない）のときは move レベル0・voice 非発火にし、
    * 他種別が居てもこの種別のSEが鳴らないようにする（種別別ルーティングの在否ゲート）。
+   *
+   * [UR4-4] pan(-1..1, 中央0) は発音元 critter の x 位置由来の左右定位。present=true 経路で
+   * move ループSE を毎フレーム pan 追従させ、スケジューラ発火のチューも同じ pan で定位する
+   * （one-shot は発火位置で固定）。present=false 経路は pan を無視する（無音なので定位不要）。
+   * 既定 0（中央）で、pan を渡さない既存 3 引数呼び出しは従来どおり中央定位で不変。
    */
-  update(speed: number, dtSeconds: number, present: boolean): void {
+  update(speed: number, dtSeconds: number, present: boolean, pan = 0): void {
     if (!present) {
       this.currentLevel = 0;
       this.moveVoice?.setLevel(0);
@@ -59,8 +64,9 @@ export class CritterAudioController {
     }
     this.currentLevel = scurryLevelFromSpeed(speed, this.scurryOpts);
     this.moveVoice?.setLevel(this.currentLevel);
+    this.moveVoice?.setPan(pan);
     if (this.sounds.voice && this.scheduler.update(dtSeconds)) {
-      this.audio.playOneShot(this.sounds.voice);
+      this.audio.playOneShot(this.sounds.voice, pan);
     }
   }
 

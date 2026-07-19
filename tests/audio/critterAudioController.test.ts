@@ -6,17 +6,24 @@ import type { LoopVoice } from "../../src/audio/synth";
 /** SE 呼び出しを記録するフェイク sink（Web Audio 非依存でグルーを検証する）。 */
 function makeFakeSink() {
   const levels: number[] = [];
+  const pans: number[] = [];
   const fired: string[] = [];
+  // [UR4-4] playOneShot に渡った pan（id と対で記録）。voice の定位検証に使う。
+  const firedPans: Array<{ id: string; pan: number | undefined }> = [];
   let loopsCreated = 0;
   const sink: AudioSink = {
-    playOneShot: (id) => {
+    playOneShot: (id, pan) => {
       fired.push(id);
+      firedPans.push({ id, pan });
     },
     createLoop: (): LoopVoice => {
       loopsCreated++;
       return {
         setLevel: (l) => {
           levels.push(l);
+        },
+        setPan: (p) => {
+          pans.push(p);
         },
         stop: () => undefined,
       };
@@ -25,7 +32,9 @@ function makeFakeSink() {
   return {
     sink,
     levels,
+    pans,
     fired,
+    firedPans,
     get loopsCreated() {
       return loopsCreated;
     },
@@ -170,5 +179,39 @@ describe("CritterAudioController", () => {
     expect(() => ctrl.silence()).not.toThrow();
     expect(ctrl.scurryLevel).toBe(0);
     expect(f.loopsCreated).toBe(0);
+  });
+
+  it("[UR4-4] present=true 経路で pan を move ループへ設定し、voice 発火も同じ pan で鳴らす", () => {
+    const f = makeFakeSink();
+    const ctrl = new CritterAudioController(
+      f.sink,
+      { voice: "squeak", move: "m" },
+      { squeak: { minInterval: 1, maxInterval: 1, rng: () => 0 } },
+    );
+    ctrl.start();
+    // pan=-0.7（左寄り）で更新 → move ループへ setPan(-0.7) が伝わる。
+    ctrl.update(9999, 0.5, true, -0.7);
+    expect(f.pans.at(-1)).toBe(-0.7);
+    // 累積 1.1s > 1s でスケジューラ発火。voice は現在の pan(+0.3) で鳴る。
+    ctrl.update(9999, 0.6, true, 0.3);
+    expect(f.pans.at(-1)).toBe(0.3);
+    expect(f.firedPans).toEqual([{ id: "squeak", pan: 0.3 }]);
+  });
+
+  it("[UR4-4] present=false 経路は setPan を呼ばない（無音なので定位不要・pan 無視）", () => {
+    const f = makeFakeSink();
+    const ctrl = new CritterAudioController(f.sink, { move: "m" });
+    ctrl.start();
+    ctrl.update(9999, 1, false, 0.9);
+    // present=false は setLevel(0) のみ。setPan は一度も呼ばれない。
+    expect(f.pans).toHaveLength(0);
+  });
+
+  it("[UR4-4] pan 省略の 3 引数 update は中央(0)で設定する（後方互換）", () => {
+    const f = makeFakeSink();
+    const ctrl = new CritterAudioController(f.sink, { move: "m" });
+    ctrl.start();
+    ctrl.update(9999, 1 / 60, true);
+    expect(f.pans.at(-1)).toBe(0);
   });
 });

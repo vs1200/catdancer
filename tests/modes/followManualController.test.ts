@@ -31,6 +31,7 @@ import { MouseFollowMovement } from "../../src/movement/MouseFollowMovement";
 /** SE 呼び出しを記録する fake sink（Web Audio 非依存でグルーを検証する。critterAudioController.test と同形）。 */
 function makeFakeSink() {
   const levels: number[] = [];
+  const pans: number[] = [];
   const fired: string[] = [];
   let loopsCreated = 0;
   const sink: AudioSink = {
@@ -43,6 +44,9 @@ function makeFakeSink() {
         setLevel: (l) => {
           levels.push(l);
         },
+        setPan: (p) => {
+          pans.push(p);
+        },
         stop: () => undefined,
       };
     },
@@ -50,6 +54,7 @@ function makeFakeSink() {
   return {
     sink,
     levels,
+    pans,
     fired,
     get loopsCreated() {
       return loopsCreated;
@@ -158,6 +163,52 @@ describe("FollowManualController の自動SE抑制（UR4-5）", () => {
       controller.stop();
     } finally {
       unregisterCritterType(CONTROL_ID);
+    }
+  });
+});
+
+describe("FollowManualController の走行音 左右定位（UR4-4）", () => {
+  const RUNNER_ID = "ur44-runner";
+  const runnerType: CritterType = {
+    id: RUNNER_ID,
+    displayName: "定位テスト走者",
+    textureUrl: "",
+    baseSize: 100,
+    defaultFacing: 1,
+    faceMode: "flip",
+    createMovement: () => new MouseFollowMovement(),
+    // move ループSE を持ち、自動音抑制フラグ無し＝present=true で駆動され pan が伝わる。
+    sounds: { move: "ur44-runner-move" },
+    hasTail: false,
+  };
+
+  it("ポインタを右へ置くと critter の x が増え pan が右(>0)へ、左へ置くと左(<0)へ寄る（反転）", () => {
+    registerCritterType(runnerType);
+    try {
+      // 右追従: ポインタを画面右外へ → critter が右へ動き、走行音 pan が正になる。
+      const right = buildController(RUNNER_ID);
+      right.controller.start();
+      right.pointerState.value = { x: VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+      for (let i = 0; i < 40; i++) {
+        right.controller.update(1 / 60);
+      }
+      expect(right.sink.pans.some((p) => p > 0)).toBe(true);
+      // 右追従の間、pan が負（左）になることはない（＝右で確かに右定位）。
+      expect(right.sink.pans.some((p) => p < 0)).toBe(false);
+      right.controller.stop();
+
+      // 左追従: ポインタを画面左外へ → critter が左へ動き、走行音 pan が負になる（定位が反転する）。
+      const left = buildController(RUNNER_ID);
+      left.controller.start();
+      left.pointerState.value = { x: -VIEWPORT.width * 8, y: VIEWPORT.height / 2 };
+      for (let i = 0; i < 40; i++) {
+        left.controller.update(1 / 60);
+      }
+      expect(left.sink.pans.some((p) => p < 0)).toBe(true);
+      expect(left.sink.pans.some((p) => p > 0)).toBe(false);
+      left.controller.stop();
+    } finally {
+      unregisterCritterType(RUNNER_ID);
     }
   });
 });

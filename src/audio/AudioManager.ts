@@ -1,4 +1,4 @@
-import { clamp01, pickRandomIndex } from "./audioMath";
+import { clamp01, clampPan, pickRandomIndex } from "./audioMath";
 import type { AudioEngine, LoopVoice } from "./synth";
 
 /**
@@ -17,14 +17,17 @@ import type { AudioEngine, LoopVoice } from "./synth";
 
 /** SE を鳴らす最小インターフェース。CritterAudioController はこれに依存（テスト時に差し替え可能）。 */
 export interface AudioSink {
-  /** id のワンショットSEを 1 発再生。 */
-  playOneShot(id: string): void;
+  /**
+   * id のワンショットSEを 1 発再生。
+   * [UR4-4] pan は発火位置の左右定位(-1..1, 中央0)。省略時 0（後方互換＝中央）。
+   */
+  playOneShot(id: string, pan?: number): void;
   /** id のループSE声部を生成。未登録/無効時は無音のダミーを返す。 */
   createLoop(id: string): LoopVoice;
 }
 
-/** ワンショットSEのビルダ（バンク登録用）。 */
-export type OneShotBuilder = (engine: AudioEngine) => void;
+/** ワンショットSEのビルダ（バンク登録用）。[UR4-4] pan は発火位置の左右定位(-1..1, 中央0)。 */
+export type OneShotBuilder = (engine: AudioEngine, pan: number) => void;
 /** ループSEのビルダ（バンク登録用）。 */
 export type LoopBuilder = (engine: AudioEngine) => LoopVoice;
 
@@ -56,10 +59,13 @@ const SAMPLE_ONESHOT_GAIN = 0.8;
 const SAMPLE_LOOP_MAX_GAIN = 0.7;
 /** サンプル走行ループの level 追従時定数(秒)。合成 scurry と同じく段差なく滑らかに追う。 */
 const SAMPLE_LOOP_SMOOTH_TAU = 0.05;
+/** [UR4-4] サンプル走行ループのパン追従時定数(秒)。合成声部の PAN_SMOOTH_TAU と揃えてゼッパーを避ける。 */
+const SAMPLE_LOOP_PAN_TAU = 0.04;
 
 /** 何もしないループ声部（無効時のフォールバック。呼び出し側は常に安全）。 */
 const NULL_LOOP: LoopVoice = {
   setLevel: () => undefined,
+  setPan: () => undefined,
   stop: () => undefined,
 };
 
@@ -336,7 +342,7 @@ export class AudioManager implements AudioSink {
    *   （＝suspended 中にスケジュールを溜め込まない元意図を維持。resume は冪等なので連続呼びも安全）。
    * - closed / unavailable(context 未生成): 従来どおり何もしない（無音維持）。
    */
-  playOneShot(id: string): void {
+  playOneShot(id: string, pan = 0): void {
     const engine = this.engine();
     if (!engine) {
       return;
@@ -347,11 +353,12 @@ export class AudioManager implements AudioSink {
       return;
     }
     // サンプル登録があれば合成ビルダより優先（同 id で実録サンプルへ差し替え）。無ければ合成フォールバック。
+    // [UR4-4] pan は発火位置の左右定位（発火時に固定＝one-shot は追従しない）。
     const fire = (): void => {
       if (samples) {
-        this.fireSampleOneShot(samples, engine, id);
+        this.fireSampleOneShot(samples, engine, id, pan);
       } else if (builder) {
-        this.fireOneShot(builder, engine, id);
+        this.fireOneShot(builder, engine, id, pan);
       }
     };
     const state = this.ctx?.state;
@@ -372,9 +379,9 @@ export class AudioManager implements AudioSink {
   }
 
   /** バンクビルダを実行して 1 発鳴らす。発火失敗は警告のみで握りつぶす（running/遅延 両経路で共通）。 */
-  private fireOneShot(builder: OneShotBuilder, engine: AudioEngine, id: string): void {
+  private fireOneShot(builder: OneShotBuilder, engine: AudioEngine, id: string, pan: number): void {
     try {
-      builder(engine);
+      builder(engine, pan);
     } catch (error) {
       console.warn(`SE 再生に失敗しました: ${id}`, error);
     }
@@ -382,10 +389,15 @@ export class AudioManager implements AudioSink {
 
   /**
    * サンプル集合からランダムに 1 つ選び、AudioBufferSourceNode で 1 発再生する。
-   * 固定 gain(SAMPLE_ONESHOT_GAIN) を挟んでから master(→analyser→destination) へ出す（muted/volume を尊重）。
-   * 終了後 onended で全ノードを切断しリークさせない。失敗は警告のみで握りつぶす。
+   * [UR4-4] 固定 gain(SAMPLE_ONESHOT_GAIN) → panner(発火位置の左右定位) → master(→analyser→destination) へ出す
+   * （muted/volume を尊重）。終了後 onended で panner 含む全ノードを切断しリークさせない。失敗は警告のみで握りつぶす。
    */
-  private fireSampleOneShot(buffers: AudioBuffer[], engine: AudioEngine, id: string): void {
+  private fireSampleOneShot(
+    buffers: AudioBuffer[],
+    engine: AudioEngine,
+    id: string,
+    pan: number,
+  ): void {
     try {
       const index = pickRandomIndex(buffers.length);
       this.lastSampleIndex.set(id, index);
@@ -393,11 +405,15 @@ export class AudioManager implements AudioSink {
       src.buffer = buffers[index];
       const gain = engine.context.createGain();
       gain.gain.value = SAMPLE_ONESHOT_GAIN;
+      const panner = engine.context.createStereoPanner();
+      panner.pan.value = clampPan(pan);
       src.connect(gain);
-      gain.connect(engine.output);
+      gain.connect(panner);
+      panner.connect(engine.output);
       src.onended = (): void => {
         src.disconnect();
         gain.disconnect();
+        panner.disconnect();
       };
       src.start();
     } catch (error) {
@@ -457,7 +473,10 @@ export class AudioManager implements AudioSink {
     const { context, output } = engine;
     const level = context.createGain();
     level.gain.value = 0;
-    level.connect(output);
+    // [UR4-4] 発音元 x に追従して左右定位する（level → panner → output）。
+    const panner = context.createStereoPanner();
+    level.connect(panner);
+    panner.connect(output);
 
     let stopped = false;
     // 予約済み（再生中＋未来予約）の全ソースを追跡し、stop() で確実に stop+disconnect する（リーク/二重再生防止）。
@@ -515,6 +534,12 @@ export class AudioManager implements AudioSink {
           SAMPLE_LOOP_SMOOTH_TAU,
         );
       },
+      setPan(pan: number): void {
+        if (stopped) {
+          return;
+        }
+        panner.pan.setTargetAtTime(clampPan(pan), context.currentTime, SAMPLE_LOOP_PAN_TAU);
+      },
       stop(): void {
         if (stopped) {
           return;
@@ -532,6 +557,7 @@ export class AudioManager implements AudioSink {
         }
         scheduled.clear();
         level.disconnect();
+        panner.disconnect();
       },
     };
   }
