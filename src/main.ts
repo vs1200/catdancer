@@ -12,6 +12,7 @@ import {
   MOUSE_SQUEAK_ID,
   registerCritterSounds,
 } from "./audio/sounds";
+import { computeSizeScale } from "./core/sizeScale";
 import {
   getCritterType,
   hasCritterType,
@@ -94,11 +95,17 @@ async function bootstrap(): Promise<void> {
   registerFoxtailType();
   registerToysType();
   registerInsectType();
-  const margin = computeWorldMargin(listCritterTypes(), DEFAULT_WORLD_MARGIN);
+  // [UR4-1] margin は hideRadius×sizeScale から決める（解像度非依存化で拡大した本体/尻尾/揺れを端で
+  // 完全に隠すため）。基準解像度(短辺1080)では sizeScale=1 で従来値と一致。resize でも同式で再計算する。
+  const worldMarginFor = (viewport: { width: number; height: number }): number =>
+    computeWorldMargin(listCritterTypes(), DEFAULT_WORLD_MARGIN, computeSizeScale(viewport));
 
-  const scene = new Scene(app.viewport, margin);
+  const scene = new Scene(app.viewport, worldMarginFor(app.viewport));
   app.stage.addChild(scene.root);
-  app.onResize((viewport) => scene.resize(viewport));
+  // resize では viewport 追従に加え、現在の sizeScale で margin を再計算して反映する（大画面へ広げても
+  // 拡大 critter が端で隠れる／小画面へ縮めても過大 margin にならない）。既存 critter の即リスケールは
+  // 行わない（新 spawn が新スケールを拾う。resize は低頻度で実害小＝簡潔に保つ）。
+  app.onResize((viewport) => scene.resize(viewport, worldMarginFor(viewport)));
 
   // 背景設定 → 描画の橋渡し。
   // デコード恒久失敗（壊れた blob）時は背景設定を単色へ戻し、壊れた設定が永続化され続けるのを防ぐ。

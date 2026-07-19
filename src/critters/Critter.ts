@@ -1,5 +1,7 @@
 import type { Container as PixiContainer, Texture } from "pixi.js";
 import { Container, Sprite } from "pixi.js";
+import { computeSizeScale } from "../core/sizeScale";
+import type { Viewport } from "../core/worldBounds";
 import { FLEE_DEFAULT_SPEED, FleeMovement } from "../movement/FleeMovement";
 import type { Movement, MovementContext } from "../movement/Movement";
 import type { CritterState, Facing } from "./CritterState";
@@ -280,6 +282,12 @@ export interface SpawnCritterParams {
   movement?: Movement;
   /** 初期 state（位置/速度/向き/サイズ）。 */
   spawn?: CritterSpawnOptions;
+  /**
+   * [UR4-1] 現在の viewport（CSS px）。渡すと baseSize（または spawn.size）へ解像度非依存の
+   * sizeScale（{@link computeSizeScale}）を乗じ、画面に占める割合を解像度に対して一定化する。
+   * 省略時は等倍（後方互換＝既存/テストの spawnCritter 呼び出しは挙動不変）。
+   */
+  viewport?: Viewport;
 }
 
 /**
@@ -291,7 +299,17 @@ export interface SpawnCritterParams {
  */
 export function spawnCritter(params: SpawnCritterParams): Critter {
   const type = getCritterType(params.typeId);
-  const state = createCritterStateFromType(params.typeId, params.spawn);
+  // [UR4-1] 解像度非依存化はここ 1 点に集約する。viewport が渡されたら baseSize（明示 spawn.size が
+  // あればそれ）に sizeScale を乗じて state.size を決める。size を state に載せるので、表示スケールだけで
+  // なく当たり半径(hitRadius)・尻尾表示幅・world margin 算出もサイズへ追従する（当たり判定と見た目が一致）。
+  // viewport 未指定なら scale=1 で従来どおり（テスト/既存呼び出しは不変）。manual foxtail は本経路を通らず
+  // 自前で viewport 相対に描くため、ここで係数を掛けても二重スケールにならない。
+  const scale = params.viewport ? computeSizeScale(params.viewport) : 1;
+  const baseSize = params.spawn?.size ?? type.baseSize;
+  const state = createCritterStateFromType(params.typeId, {
+    ...params.spawn,
+    size: baseSize * scale,
+  });
   const movement = params.movement ?? type.createMovement();
   return new Critter(state, params.bodyTexture, movement, {
     defaultFacing: type.defaultFacing,

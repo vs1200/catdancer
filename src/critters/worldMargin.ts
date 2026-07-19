@@ -34,11 +34,21 @@ export function critterHideRadius(type: CritterType): number {
 /**
  * 登録種別群を完全に隠すのに必要な world margin(px)。表示中の最大 hideRadius を採用する。
  * 種別が無い/半径 0 のときは fallback を用いる。過大にならないよう ceil のみ（余分な係数なし）。
+ *
+ * [UR4-1] hideRadius は baseSize 由来だが、実際の表示サイズは baseSize×sizeScale（解像度非依存化）で
+ * 決まる。そこで sizeScale を hideRadius に乗じ、大画面で拡大した本体/尻尾/揺れも端で完全に隠れるよう
+ * margin を追従させる（sizeScale=1 の基準解像度では従来値と一致＝既存 feel 不変。呼び出し側が resize で
+ * 現在の sizeScale を渡して再計算する）。fallback は種別ゼロ時の安全値なのでスケールしない。
  */
-export function computeWorldMargin(types: readonly CritterType[], fallback: number): number {
+export function computeWorldMargin(
+  types: readonly CritterType[],
+  fallback: number,
+  sizeScale = 1,
+): number {
+  const scale = Number.isFinite(sizeScale) && sizeScale > 0 ? sizeScale : 1;
   let max = 0;
   for (const type of types) {
-    const r = critterHideRadius(type);
+    const r = critterHideRadius(type) * scale;
     if (r > max) {
       max = r;
     }

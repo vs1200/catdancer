@@ -183,6 +183,8 @@ export class InsectManualController implements ManualController {
         velocity: erraticEntryVelocity(plan),
         facing: plan.facing,
       },
+      // [UR4-1] 現在の viewport を渡して baseSize を解像度非依存にスケールする。
+      viewport: this.deps.scene.worldBounds.viewport,
     });
   }
 

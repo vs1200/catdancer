@@ -91,6 +91,8 @@ export class FollowManualController implements ManualController {
       // （mouse は種別既定と同一値のため従来挙動が不変）。
       movement: new MouseFollowMovement(),
       spawn: { position: { x: vp.width / 2, y: vp.height / 2 } },
+      // [UR4-1] 現在の viewport を渡して baseSize を解像度非依存にスケールする。
+      viewport: vp,
     });
     scene.add(this.critter);
     this.audioCtrl.start();

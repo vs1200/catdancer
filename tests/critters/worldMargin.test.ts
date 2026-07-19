@@ -60,4 +60,19 @@ describe("computeWorldMargin", () => {
   it("小さな尻尾なし種別なら margin も小さくなる（過大にしない）", () => {
     expect(computeWorldMargin([makeType({ baseSize: 80, hasTail: false })], 220)).toBe(40);
   });
+
+  it("[UR4-1] sizeScale を hideRadius に乗じて追従する（省略時=1 で従来値）", () => {
+    // ネズミ hideRadius=319。scale=1（既定）は従来どおり 319。
+    expect(computeWorldMargin([mouseType], 220)).toBe(319);
+    expect(computeWorldMargin([mouseType], 220, 1)).toBe(319);
+    // 大画面（scale=2）は 2 倍、小画面（scale=0.5）は半分（ceil）。
+    expect(computeWorldMargin([mouseType], 220, 2)).toBe(638);
+    expect(computeWorldMargin([mouseType], 220, 0.5)).toBe(160); // ceil(159.5)
+  });
+
+  it("[UR4-1] sizeScale が異常値（0/負/NaN）でも 1 として扱い壊れない", () => {
+    expect(computeWorldMargin([mouseType], 220, 0)).toBe(319);
+    expect(computeWorldMargin([mouseType], 220, -3)).toBe(319);
+    expect(computeWorldMargin([mouseType], 220, Number.NaN)).toBe(319);
+  });
 });

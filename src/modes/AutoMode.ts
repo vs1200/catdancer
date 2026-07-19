@@ -322,6 +322,8 @@ export class AutoMode implements Mode {
       tailTexture: entry.tailTexture,
       movement: plan.movement,
       spawn: { position: plan.position, velocity: plan.velocity, facing: plan.facing },
+      // [UR4-1] 現在の viewport を渡して baseSize を解像度非依存にスケールする（auto の全種別に効く）。
+      viewport: scene.worldBounds.viewport,
     });
   }
 }

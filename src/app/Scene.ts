@@ -68,9 +68,13 @@ export class Scene {
     return this.backgroundLayerValue;
   }
 
-  /** リサイズ時に world 領域を作り直し（margin 維持）、背景も再フィットする。 */
-  resize(viewport: Viewport): void {
-    this.worldBoundsValue = createWorldBounds(viewport, this.worldBoundsValue.margin);
+  /**
+   * リサイズ時に world 領域を作り直し、背景も再フィットする。
+   * [UR4-1] margin を渡すと更新する（解像度非依存化で拡大した critter を隠せるよう resize で再計算した
+   * 値を反映）。省略時は現在の margin を維持（後方互換）。
+   */
+  resize(viewport: Viewport, margin: number = this.worldBoundsValue.margin): void {
+    this.worldBoundsValue = createWorldBounds(viewport, margin);
     this.backgroundLayerValue.resize(viewport);
   }
 
